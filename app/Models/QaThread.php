@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Enums\QaThreadStatus;
+use Database\Factories\QaThreadFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -19,6 +20,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 class QaThread extends Model
 {
+    /** @use HasFactory<QaThreadFactory> */
     use HasFactory, HasUlids;
 
     // 保存可能な属性の定義であり、投稿者・対象資格をクライアントが任意指定できることは意味しない。
