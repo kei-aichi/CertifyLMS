@@ -25,6 +25,8 @@ use App\Http\Controllers\MockExamQuestionController;
 use App\Http\Controllers\MockExamSessionController;
 use App\Http\Controllers\MockExamSessionMonitorController;
 use App\Http\Controllers\PartController;
+use App\Http\Controllers\QaReplyController;
+use App\Http\Controllers\QaThreadController;
 use App\Http\Controllers\QuestionCategoryController;
 use App\Http\Controllers\QuizHistoryController;
 use App\Http\Controllers\QuizStatsController;
@@ -474,3 +476,22 @@ if (app()->environment('local')) {
         return view('_dev.components');
     })->name('_dev.components');
 }
+
+// 質問掲示板の更新操作。利用状態・担当資格はPolicyで判定する。
+Route::middleware('auth')->prefix('qa-board')->name('qa-board.')->scopeBindings()->group(function () {
+    Route::post('/', [QaThreadController::class, 'store'])->name('store');
+    Route::patch('{thread}', [QaThreadController::class, 'update'])->name('update');
+    Route::delete('{thread}', [QaThreadController::class, 'destroy'])->name('destroy');
+    Route::post('{thread}/resolve', [QaThreadController::class, 'resolve'])->name('resolve');
+    Route::post('{thread}/unresolve', [QaThreadController::class, 'unresolve'])->name('unresolve');
+    // replies()によるscoped bindingで、別質問の回答IDへの差し替えを拒否する。
+    Route::post('{thread}/replies', [QaReplyController::class, 'store'])->name('replies.store');
+    Route::patch('{thread}/replies/{reply}', [QaReplyController::class, 'update'])->name('replies.update');
+    Route::delete('{thread}/replies/{reply}', [QaReplyController::class, 'destroy'])->name('replies.destroy');
+});
+
+// 提供済み管理画面の削除用Route名に合わせる。投稿・代理編集は提供しない。
+Route::middleware(['auth', 'role:admin'])->prefix('admin/qa-board')->name('admin.qa-board.')->scopeBindings()->group(function () {
+    Route::delete('{thread}', [QaThreadController::class, 'destroy'])->name('destroy');
+    Route::delete('{thread}/replies/{reply}', [QaReplyController::class, 'destroy'])->name('replies.destroy');
+});
