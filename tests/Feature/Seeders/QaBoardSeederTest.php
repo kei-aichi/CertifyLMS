@@ -103,9 +103,9 @@ class QaBoardSeederTest extends TestCase
     {
         User::factory()->student()->inProgress()->create(['email' => 'student@certify-lms.test']);
         $draft = Certification::factory()->draft()->create();
-        CertificationCoachAssignment::factory()->for($draft)->create();
+        CertificationCoachAssignment::factory()->create(['certification_id' => $draft->id]);
         $published = Certification::factory()->published()->create();
-        CertificationCoachAssignment::factory()->for($published)->unassigned()->create();
+        CertificationCoachAssignment::factory()->unassigned()->create(['certification_id' => $published->id]);
 
         // 資格が公開済みでも過去の担当履歴だけでは回答者を選べず、下書き資格もデモ対象外。
         $this->seed(QaBoardSeeder::class);

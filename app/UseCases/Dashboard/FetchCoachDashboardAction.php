@@ -127,7 +127,8 @@ final class FetchCoachDashboardAction
             ->whereHas('certification', fn ($query) => $query->published())
             ->where('status', QaThreadStatus::Open)
             ->whereDoesntHave('replies')
-            ->with(['user', 'certification'])
+            // 退会後も質問は保持されるため、サマリの投稿者も元のUserを取得する。
+            ->with(['user' => fn ($query) => $query->withTrashed(), 'certification'])
             ->latest()
             ->limit(5)
             ->get()
