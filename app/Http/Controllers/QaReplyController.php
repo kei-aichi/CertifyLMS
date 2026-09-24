@@ -13,25 +13,32 @@ use App\UseCases\QaReply\StoreAction;
 use App\UseCases\QaReply\UpdateAction;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\View\View;
 
 /**
  * 回答の更新操作をActionへ委譲する。
- * GET画面は後続Stepで追加するため、リダイレクトは予定URLを使用する。
  */
 class QaReplyController extends Controller
 {
+    public function edit(QaThread $thread, QaReply $reply): View
+    {
+        $this->authorize('update', $reply);
+
+        return view('qa-thread.reply-edit', compact('thread', 'reply'));
+    }
+
     public function store(QaThread $thread, StoreRequest $request, StoreAction $action): RedirectResponse
     {
         $action($thread, $request->user(), $request->validated());
 
-        return redirect('qa-board/'.$thread->id)->with('success', '回答を投稿しました。');
+        return redirect()->route('qa-board.show', $thread)->with('success', '回答を投稿しました。');
     }
 
     public function update(QaThread $thread, QaReply $reply, UpdateRequest $request, UpdateAction $action): RedirectResponse
     {
         $action($reply, $request->user(), $request->validated());
 
-        return redirect('qa-board/'.$thread->id)->with('success', '回答を更新しました。');
+        return redirect()->route('qa-board.show', $thread)->with('success', '回答を更新しました。');
     }
 
     public function destroy(QaThread $thread, QaReply $reply, Request $request, DestroyAction $action): RedirectResponse
@@ -40,8 +47,8 @@ class QaReplyController extends Controller
 
         $action($reply, $request->user());
 
-        $prefix = $request->routeIs('admin.*') ? 'admin/qa-board' : 'qa-board';
+        $prefix = $request->routeIs('admin.*') ? 'admin.qa-board.show' : 'qa-board.show';
 
-        return redirect($prefix.'/'.$thread->id)->with('success', '回答を削除しました。');
+        return redirect()->route($prefix, $thread)->with('success', '回答を削除しました。');
     }
 }

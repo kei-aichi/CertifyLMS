@@ -479,6 +479,11 @@ if (app()->environment('local')) {
 
 // 質問掲示板の更新操作。利用状態・担当資格はPolicyで判定する。
 Route::middleware('auth')->prefix('qa-board')->name('qa-board.')->scopeBindings()->group(function () {
+    Route::get('/', [QaThreadController::class, 'index'])->name('index');
+    Route::get('create', [QaThreadController::class, 'create'])->name('create');
+    Route::get('{thread}', [QaThreadController::class, 'show'])->name('show');
+    Route::get('{thread}/edit', [QaThreadController::class, 'edit'])->name('edit');
+    Route::get('{thread}/replies/{reply}/edit', [QaReplyController::class, 'edit'])->name('replies.edit');
     Route::post('/', [QaThreadController::class, 'store'])->name('store');
     Route::patch('{thread}', [QaThreadController::class, 'update'])->name('update');
     Route::delete('{thread}', [QaThreadController::class, 'destroy'])->name('destroy');
@@ -492,6 +497,8 @@ Route::middleware('auth')->prefix('qa-board')->name('qa-board.')->scopeBindings(
 
 // 提供済み管理画面の削除用Route名に合わせる。投稿・代理編集は提供しない。
 Route::middleware(['auth', 'role:admin'])->prefix('admin/qa-board')->name('admin.qa-board.')->scopeBindings()->group(function () {
+    Route::get('/', [QaThreadController::class, 'index'])->name('index');
+    Route::get('{thread}', [QaThreadController::class, 'show'])->name('show');
     Route::delete('{thread}', [QaThreadController::class, 'destroy'])->name('destroy');
     Route::delete('{thread}/replies/{reply}', [QaReplyController::class, 'destroy'])->name('replies.destroy');
 });

@@ -39,7 +39,10 @@ class QaThreadPolicy
         return match ($user->role) {
             UserRole::Student => true,
             // coaches() は unassigned_at が NULL の現役割当だけを返す。
-            UserRole::Coach => $thread->certification->coaches()->where('users.id', $user->id)->exists(),
+            UserRole::Coach => $thread->certification->relationLoaded('coaches')
+                // 詳細表示で一括取得した現役担当を共有する。未ロードの更新リクエストはDBで確認する。
+                ? $thread->certification->coaches->contains('id', $user->id)
+                : $thread->certification->coaches()->where('users.id', $user->id)->exists(),
             default => false,
         };
     }

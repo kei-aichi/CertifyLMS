@@ -100,6 +100,8 @@ final class FetchCoachDashboardAction
 
         return QaThread::query()
             ->whereIn('certification_id', $certificationIds)
+            // 掲示板の一覧Route追加後も、公開停止した資格の質問を露出させない。
+            ->whereHas('certification', fn ($query) => $query->published())
             ->where('status', QaThreadStatus::Open)
             ->whereDoesntHave('replies')
             ->count();
@@ -121,6 +123,8 @@ final class FetchCoachDashboardAction
 
         return QaThread::query()
             ->whereIn('certification_id', $certificationIds)
+            // 掲示板の一覧Route追加後も、公開停止した資格の質問を露出させない。
+            ->whereHas('certification', fn ($query) => $query->published())
             ->where('status', QaThreadStatus::Open)
             ->whereDoesntHave('replies')
             ->with(['user', 'certification'])
