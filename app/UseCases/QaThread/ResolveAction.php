@@ -9,10 +9,9 @@ use App\Models\QaThread;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
-use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 
 /**
- * 状態と解決日時を同一トランザクションで更新し、同時の二重操作も拒否する。
+ * 状態と解決日時を同一トランザクションで更新し、目的の状態なら変更せず成功する。
  */
 final class ResolveAction
 {
@@ -20,10 +19,11 @@ final class ResolveAction
     {
         return DB::transaction(function () use ($thread, $user) {
             $thread = QaThread::query()->lockForUpdate()->findOrFail($thread->id);
-            // 他人の操作は403。本人の二重操作だけを409にするため認可を先に行う。
+            // 目的の状態でも認可は省略せず、権限のない操作を拒否する。
             Gate::forUser($user)->authorize('resolve', $thread);
-            if ($thread->status !== QaThreadStatus::Open) {
-                throw new ConflictHttpException('質問はすでに解決済みです。');
+            if ($thread->status === QaThreadStatus::Resolved) {
+                // 再送では解決日時・更新日時を保持するため、保存処理を行わない。
+                return $thread;
             }
             $thread->update(['status' => QaThreadStatus::Resolved, 'resolved_at' => now()]);
 

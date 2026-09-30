@@ -22,7 +22,7 @@ use Tests\TestCase;
 /**
  * 質問のロール・利用状態・資格公開状態・本人条件を検証する。
  * User::can() を経由し、Policyの登録と既存Bladeからの呼び出し方も保証する。
- * 状態遷移・409・更新内容の検証は後続のActionテストで扱う。
+ * 状態遷移・冪等性・更新内容の検証はActionテストで扱う。
  */
 class QaThreadPolicyTest extends TestCase
 {
@@ -183,7 +183,7 @@ class QaThreadPolicyTest extends TestCase
         $thread = QaThread::factory()->{$state}()->create();
         $before = $thread->fresh()->getAttributes();
 
-        // 回答0件でも解決操作を認可。二重解決は403にせず、後続Actionで409にする。
+        // 回答0件でも解決操作を認可。目的の状態への再操作も同じ認可条件を適用する。
         $this->assertTrue($thread->user->can('resolve', $thread));
         $this->assertTrue($thread->user->can('unresolve', $thread));
         QaReply::factory()->for($thread, 'qaThread')->create();

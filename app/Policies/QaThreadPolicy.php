@@ -76,7 +76,7 @@ class QaThreadPolicy
 
     public function resolve(User $user, QaThread $thread): bool
     {
-        // 回答0件でも自己解決できる。二重解決の409は認可後の状態遷移処理で判定する。
+        // 回答0件でも自己解決できる。現在の状態によらず本人の操作を認可する。
         return $this->update($user, $thread);
     }
 

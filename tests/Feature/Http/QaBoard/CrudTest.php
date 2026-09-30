@@ -74,7 +74,7 @@ class CrudTest extends TestCase
         $this->assertDatabaseMissing('qa_replies', ['id' => $reply->id]);
     }
 
-    public function test_resolution_and_duplicate_conflicts_preserve_timestamps(): void
+    public function test_resolution_and_idempotent_retries_preserve_timestamps(): void
     {
         $thread = QaThread::factory()->create();
         $this->actingAs($thread->user);
@@ -85,27 +85,46 @@ class CrudTest extends TestCase
         $this->assertTrue($thread->resolved_at->equalTo(now()));
         $before = $thread->getAttributes();
         $this->travel(1)->hours();
-        $this->postJson(route('qa-board.resolve', $thread))->assertConflict();
+        $this->postJson(route('qa-board.resolve', $thread))->assertRedirect(route('qa-board.show', $thread))->assertSessionHas('success')->assertSessionMissing('error');
         $this->assertSame($before, $thread->fresh()->getAttributes());
         $this->post(route('qa-board.unresolve', $thread))->assertRedirect();
         $this->assertSame(QaThreadStatus::Open, $thread->fresh()->status);
         $this->assertNull($thread->fresh()->resolved_at);
-        $this->postJson(route('qa-board.unresolve', $thread))->assertConflict();
+        // 未解決への再送でもupdated_atを含む全属性を変更しない。
+        $openBefore = $thread->fresh()->getAttributes();
+        $this->travel(1)->hours();
+        $this->postJson(route('qa-board.unresolve', $thread))->assertRedirect(route('qa-board.show', $thread))->assertSessionHas('success')->assertSessionMissing('error');
+        $this->assertSame($openBefore, $thread->fresh()->getAttributes());
         $this->post(route('qa-board.resolve', $thread))->assertRedirect();
         $this->assertTrue($thread->fresh()->resolved_at->equalTo(now()));
-        // 状態が競合していても、他人・管理者の代理操作は409ではなく403。
-        foreach ([User::factory()->student()->create(), User::factory()->admin()->create()] as $other) {
-            foreach (['resolve', 'unresolve'] as $ability) {
-                $this->actingAs($other)->postJson(route('qa-board.'.$ability, $thread))->assertForbidden();
+        $this->assertNotSame($before['resolved_at'], $thread->fresh()->getRawOriginal('resolved_at'));
+    }
+
+    public function test_duplicate_operations_require_authorization_in_both_states(): void
+    {
+        // 目的の状態でも他人・管理者・コーチの代理操作は成功扱いにしない。
+        foreach (['open', 'resolved'] as $state) {
+            $thread = QaThread::factory()->{$state}()->create();
+            $before = $thread->fresh()->getAttributes();
+            foreach ([User::factory()->student()->create(), User::factory()->admin()->create(), User::factory()->coach()->create()] as $other) {
+                foreach (['resolve', 'unresolve'] as $ability) {
+                    $this->actingAs($other)->postJson(route('qa-board.'.$ability, $thread))->assertForbidden();
+                }
             }
+            $this->assertSame($before, $thread->fresh()->getAttributes());
         }
     }
 
-    public function test_browser_conflict_follows_existing_flash_redirect_convention(): void
+    public function test_browser_duplicate_operations_redirect_with_success_without_changes(): void
     {
-        $thread = QaThread::factory()->resolved()->create();
-        $this->actingAs($thread->user)->from('/qa-board/'.$thread->id)
-            ->post(route('qa-board.resolve', $thread))->assertRedirect('/qa-board/'.$thread->id)->assertSessionHas('error');
+        foreach (['resolved' => 'resolve', 'open' => 'unresolve'] as $state => $ability) {
+            $thread = QaThread::factory()->{$state}()->create();
+            $before = $thread->fresh()->getAttributes();
+            $this->travel(1)->hours();
+            $this->actingAs($thread->user)->post(route('qa-board.'.$ability, $thread))
+                ->assertRedirect(route('qa-board.show', $thread))->assertSessionHas('success')->assertSessionMissing('error');
+            $this->assertSame($before, $thread->fresh()->getAttributes());
+        }
     }
 
     public function test_student_and_assigned_coach_reply_crud_never_touches_parent(): void

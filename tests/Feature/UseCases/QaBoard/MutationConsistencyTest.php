@@ -10,11 +10,11 @@ use App\Models\User;
 use App\UseCases\QaReply\StoreAction;
 use App\UseCases\QaThread\DestroyAction;
 use App\UseCases\QaThread\ResolveAction;
+use App\UseCases\QaThread\UnresolveAction;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
-use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 use Tests\TestCase;
 
 /**
@@ -53,14 +53,26 @@ class MutationConsistencyTest extends TestCase
         }
     }
 
-    public function test_resolve_reloads_state_under_lock(): void
+    public function test_state_operations_reload_before_idempotent_success(): void
     {
-        $thread = QaThread::factory()->create();
-        $user = $thread->user;
-        app(ResolveAction::class)($thread, $user);
-        // 呼び出し元のModelはopenのままでも、DBではresolvedなので409。
-        $this->expectException(ConflictHttpException::class);
-        app(ResolveAction::class)($thread, $user);
+        foreach (['open' => ResolveAction::class, 'resolved' => UnresolveAction::class] as $state => $action) {
+            $thread = QaThread::factory()->{$state}()->create();
+            $user = $thread->user;
+            $result = app($action)($thread, $user);
+            $before = $result->fresh()->getAttributes();
+            $this->travel(1)->hours();
+            // 古いModelを再送してもDBの最新状態を使い、解決日時・更新日時を上書きしない。
+            $retried = app($action)($thread, $user);
+            $this->assertSame($before, $retried->getAttributes());
+            $this->assertSame($before, $thread->fresh()->getAttributes());
+            // Actionを直接呼ぶ場合も、既に目的の状態だからといって認可を省略しない。
+            try {
+                app($action)($thread, User::factory()->admin()->create());
+                $this->fail('代理操作を成功扱いにしてはいけない');
+            } catch (AuthorizationException) {
+                $this->assertSame($before, $thread->fresh()->getAttributes());
+            }
+        }
     }
 
     public function test_reply_creation_and_deletion_lock_the_same_parent_row(): void
