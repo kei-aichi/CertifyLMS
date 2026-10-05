@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\UseCases\Dashboard;
 
 use App\Enums\EnrollmentStatus;
+use App\Enums\MeetingPackStatus;
 use App\Enums\PassProbabilityBand;
 use App\Models\Certificate;
 use App\Models\Certification;
@@ -24,6 +25,9 @@ use App\Services\LearningCalendarService;
 use App\Services\StreakService;
 use App\UseCases\Dashboard\FetchStudentDashboardAction;
 use App\UseCases\Dashboard\ViewModels\ResumeCard;
+use App\UseCases\MeetingPack\ArchiveAction;
+use App\UseCases\MeetingPack\PublishAction;
+use App\UseCases\MeetingPack\UnarchiveAction;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Mockery;
 use Tests\TestCase;
@@ -61,6 +65,63 @@ class FetchStudentDashboardActionTest extends TestCase
 
         $this->assertNotNull($vm->planInfo);
         $this->assertSame(5, $vm->planInfo->meetingsRemaining);
+        $this->assertCount(1, $vm->planInfo->meetingPacks);
+    }
+
+    public function test_meeting_pack_publish_updates_dashboard_visibility(): void
+    {
+        $student = $this->makeStudentWithPlan();
+        $admin = User::factory()->admin()->create();
+        $pack = MeetingPack::factory()->draft()->create();
+        $visiblePack = MeetingPack::factory()->published()->create();
+
+        // 管理画面と同じActionを通し、状態変更後も公開中だけを取得する契約を保証する。
+        app(PublishAction::class)($pack, $admin);
+        $vm = app(FetchStudentDashboardAction::class)($student);
+
+        $this->assertSame(MeetingPackStatus::Published, $pack->fresh()->status);
+        $this->assertNotNull($vm->planInfo);
+        $this->assertTrue($vm->planInfo->meetingPacks->contains('id', $pack->id));
+        // パネル全体が空になっただけで非表示テストが通ることを防ぐ。
+        $this->assertTrue($vm->planInfo->meetingPacks->contains('id', $visiblePack->id));
+        $this->assertCount(2, $vm->planInfo->meetingPacks);
+    }
+
+    public function test_meeting_pack_archive_updates_dashboard_visibility(): void
+    {
+        $student = $this->makeStudentWithPlan();
+        $admin = User::factory()->admin()->create();
+        $pack = MeetingPack::factory()->published()->create();
+        $visiblePack = MeetingPack::factory()->published()->create();
+
+        // 管理画面と同じActionを通し、状態変更後も公開中だけを取得する契約を保証する。
+        app(ArchiveAction::class)($pack, $admin);
+        $vm = app(FetchStudentDashboardAction::class)($student);
+
+        $this->assertSame(MeetingPackStatus::Archived, $pack->fresh()->status);
+        $this->assertNotNull($vm->planInfo);
+        $this->assertFalse($vm->planInfo->meetingPacks->contains('id', $pack->id));
+        // パネル全体が空になっただけで非表示テストが通ることを防ぐ。
+        $this->assertTrue($vm->planInfo->meetingPacks->contains('id', $visiblePack->id));
+        $this->assertCount(1, $vm->planInfo->meetingPacks);
+    }
+
+    public function test_meeting_pack_unarchive_updates_dashboard_visibility(): void
+    {
+        $student = $this->makeStudentWithPlan();
+        $admin = User::factory()->admin()->create();
+        $pack = MeetingPack::factory()->archived()->create();
+        $visiblePack = MeetingPack::factory()->published()->create();
+
+        // 管理画面と同じActionを通し、状態変更後も公開中だけを取得する契約を保証する。
+        app(UnarchiveAction::class)($pack, $admin);
+        $vm = app(FetchStudentDashboardAction::class)($student);
+
+        $this->assertSame(MeetingPackStatus::Draft, $pack->fresh()->status);
+        $this->assertNotNull($vm->planInfo);
+        $this->assertFalse($vm->planInfo->meetingPacks->contains('id', $pack->id));
+        // パネル全体が空になっただけで非表示テストが通ることを防ぐ。
+        $this->assertTrue($vm->planInfo->meetingPacks->contains('id', $visiblePack->id));
         $this->assertCount(1, $vm->planInfo->meetingPacks);
     }
 

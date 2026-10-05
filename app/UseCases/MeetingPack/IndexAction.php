@@ -22,7 +22,7 @@ final class IndexAction
 
         // 「0」も検索語として扱い、説明文や空白区切りの別キーワードへ検索範囲を広げない。
         if ($keyword !== null && $keyword !== '') {
-            $query->where('name', 'like', '%' . $keyword . '%');
+            $query->where('name', 'like', '%'.$keyword.'%');
         }
 
         if ($status !== null) {
