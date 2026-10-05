@@ -11,12 +11,15 @@ use App\Http\Requests\MeetingPack\UpdateRequest;
 use App\Models\MeetingPack;
 use App\UseCases\MeetingPack\IndexAction;
 use App\UseCases\MeetingPack\ShowAction;
+use App\UseCases\MeetingPack\StoreAction;
+use App\UseCases\MeetingPack\UpdateAction;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\View\View;
 
 /**
  * 面談パック管理の認可・入力検証の入口。
  *
- * 一覧・詳細は Action へ委譲する。残りの操作は後続 Step で接続するため、
+ * 取得・保存処理は Action へ委譲する。削除・状態変更は後続 Step で接続するため、
  * 成功と誤認させないよう認可・検証後に 501 で終了する。
  */
 class MeetingPackController extends Controller
@@ -34,18 +37,19 @@ class MeetingPackController extends Controller
         ]);
     }
 
-    public function create(): never
+    public function create(): View
     {
         $this->authorize('create', MeetingPack::class);
 
-        // TODO: create の業務処理・応答を後続 Step で接続する。
-        abort(501, '面談パック管理の業務処理は未実装です。');
+        return view('meeting-pack.management.create');
     }
 
-    public function store(StoreRequest $request): never
+    public function store(StoreRequest $request, StoreAction $action): RedirectResponse
     {
-        // TODO: store の業務処理・応答を後続 Step で接続する。
-        abort(501, '面談パック管理の業務処理は未実装です。');
+        $plan = $action($request->user(), $request->validated());
+
+        return redirect()->route('admin.meeting-packs.show', $plan)
+            ->with('success', '面談パックを作成しました。');
     }
 
     public function show(MeetingPack $plan, ShowAction $action): View
@@ -55,18 +59,19 @@ class MeetingPackController extends Controller
         return view('meeting-pack.management.show', ['plan' => $action($plan)]);
     }
 
-    public function edit(MeetingPack $plan): never
+    public function edit(MeetingPack $plan): View
     {
         $this->authorize('update', $plan);
 
-        // TODO: edit の業務処理・応答を後続 Step で接続する。
-        abort(501, '面談パック管理の業務処理は未実装です。');
+        return view('meeting-pack.management.edit', ['plan' => $plan]);
     }
 
-    public function update(MeetingPack $plan, UpdateRequest $request): never
+    public function update(MeetingPack $plan, UpdateRequest $request, UpdateAction $action): RedirectResponse
     {
-        // TODO: update の業務処理・応答を後続 Step で接続する。
-        abort(501, '面談パック管理の業務処理は未実装です。');
+        $plan = $action($plan, $request->user(), $request->validated());
+
+        return redirect()->route('admin.meeting-packs.show', $plan)
+            ->with('success', '面談パックを更新しました。');
     }
 
     public function destroy(MeetingPack $plan): never
