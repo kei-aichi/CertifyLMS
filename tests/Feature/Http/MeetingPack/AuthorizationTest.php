@@ -59,12 +59,10 @@ class AuthorizationTest extends TestCase
         $before = $plan->fresh()->getRawOriginal();
         $this->actingAs(User::factory()->admin()->create());
         foreach ($this->endpoints($plan) as [$method, $name, $parameters]) {
-            if (in_array($name, ['store', 'update', 'publish', 'archive', 'unarchive'], true)) {
+            if (in_array($name, ['store', 'update', 'destroy', 'publish', 'archive', 'unarchive'], true)) {
                 continue;
             }
-            // 削除は未接続のまま、データを変更しない。
-            $expected = in_array($name, ['index', 'show', 'create', 'edit'], true) ? 200 : 501;
-            $this->json($method, route('admin.meeting-packs.'.$name, $parameters), $this->payload())->assertStatus($expected);
+            $this->json($method, route('admin.meeting-packs.'.$name, $parameters), $this->payload())->assertOk();
         }
         $this->assertDatabaseCount('meeting_packs', 1);
         $this->assertSame($before, $plan->fresh()->getRawOriginal());

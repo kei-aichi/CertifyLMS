@@ -10,6 +10,7 @@ use App\Http\Requests\MeetingPack\StoreRequest;
 use App\Http\Requests\MeetingPack\UpdateRequest;
 use App\Models\MeetingPack;
 use App\UseCases\MeetingPack\ArchiveAction;
+use App\UseCases\MeetingPack\DestroyAction;
 use App\UseCases\MeetingPack\IndexAction;
 use App\UseCases\MeetingPack\PublishAction;
 use App\UseCases\MeetingPack\ShowAction;
@@ -22,8 +23,7 @@ use Illuminate\View\View;
 /**
  * 面談パック管理の認可・入力検証の入口。
  *
- * 取得・保存処理は Action へ委譲する。削除は後続 Step で接続するため、
- * 成功と誤認させないよう認可・検証後に 501 で終了する。
+ * 取得・保存・状態変更・削除の業務処理は Action へ委譲する。
  */
 class MeetingPackController extends Controller
 {
@@ -77,12 +77,14 @@ class MeetingPackController extends Controller
             ->with('success', '面談パックを更新しました。');
     }
 
-    public function destroy(MeetingPack $plan): never
+    public function destroy(MeetingPack $plan, DestroyAction $action): RedirectResponse
     {
         $this->authorize('delete', $plan);
 
-        // TODO: destroy の業務処理・応答を後続 Step で接続する。
-        abort(501, '面談パック管理の業務処理は未実装です。');
+        $action($plan);
+
+        return redirect()->route('admin.meeting-packs.index')
+            ->with('success', '面談パックを削除しました。');
     }
 
     public function publish(MeetingPack $plan, PublishAction $action): RedirectResponse
