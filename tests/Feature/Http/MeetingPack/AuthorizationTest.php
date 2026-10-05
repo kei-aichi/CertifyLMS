@@ -10,7 +10,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 /**
- * 10 Route の認証・認可と Binding を検証する。作成・更新の成功は WriteTest で検証する。
+ * 10 Route の認証・認可と Binding を検証する。保存・状態変更の成功は各操作のHTTPテストで検証する。
  */
 class AuthorizationTest extends TestCase
 {
@@ -59,10 +59,10 @@ class AuthorizationTest extends TestCase
         $before = $plan->fresh()->getRawOriginal();
         $this->actingAs(User::factory()->admin()->create());
         foreach ($this->endpoints($plan) as [$method, $name, $parameters]) {
-            if (in_array($name, ['store', 'update'], true)) {
+            if (in_array($name, ['store', 'update', 'publish', 'archive', 'unarchive'], true)) {
                 continue;
             }
-            // 削除・状態変更は未接続のまま、データを変更しない。
+            // 削除は未接続のまま、データを変更しない。
             $expected = in_array($name, ['index', 'show', 'create', 'edit'], true) ? 200 : 501;
             $this->json($method, route('admin.meeting-packs.'.$name, $parameters), $this->payload())->assertStatus($expected);
         }
