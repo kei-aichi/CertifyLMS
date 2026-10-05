@@ -43,6 +43,45 @@ class WriteTest extends TestCase
         ]);
     }
 
+    public function test_store_html_validation_failure_preserves_input_without_creating_pack(): void
+    {
+        $this->actingAs(User::factory()->admin()->create());
+        $form = route('admin.meeting-packs.create');
+        $input = array_replace($this->payload(), ['name' => '']);
+
+        // 名前の不備で戻っても、正常な入力を再入力する必要がないことを保証する。
+        $this->from($form)->post(route('admin.meeting-packs.store'), $input)
+            ->assertRedirect($form)
+            ->assertSessionHasErrors('name')
+            ->assertSessionHasInput('meeting_count', $input['meeting_count'])
+            ->assertSessionHasInput('price', $input['price']);
+
+        $this->assertDatabaseCount('meeting_packs', 0);
+    }
+
+    public function test_update_html_validation_failure_preserves_input_and_existing_pack(): void
+    {
+        $this->actingAs(User::factory()->admin()->create());
+        $plan = MeetingPack::factory()->published()->create([
+            'name' => '変更前', 'description' => '変更前の説明',
+            'meeting_count' => 1, 'price' => 3000,
+            'stripe_price_id' => 'price_original', 'sort_order' => 1,
+        ]);
+        $before = $plan->fresh()->getRawOriginal();
+        $form = route('admin.meeting-packs.edit', $plan);
+        $input = array_replace($this->payload(), ['name' => '']);
+        $this->travel(1)->minutes();
+
+        $this->from($form)->patch(route('admin.meeting-packs.update', $plan), $input)
+            ->assertRedirect($form)
+            ->assertSessionHasErrors('name')
+            ->assertSessionHasInput('meeting_count', $input['meeting_count'])
+            ->assertSessionHasInput('price', $input['price']);
+
+        // 正常な入力項目だけが部分保存されることも、監査情報が更新されることも許容しない。
+        $this->assertSame($before, $plan->fresh()->getRawOriginal());
+    }
+
     public static function sortOrders(): array
     {
         return ['未指定' => [[], 0, 9], 'null' => [['sort_order' => null], 0, 9],
