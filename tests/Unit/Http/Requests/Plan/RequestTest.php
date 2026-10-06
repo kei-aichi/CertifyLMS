@@ -62,8 +62,8 @@ class RequestTest extends TestCase
                 'updated_by_user_id' => 'forged',
             ], $request->rules());
 
-            // 作成のみ並び順を受け付ける。更新入力は後続Stepまで変更しない。
-            $expected = $request instanceof StoreRequest ? $basic + ['sort_order' => 10] : $basic;
+            // 作成・更新とも並び順だけを受け付け、管理フィールドは除外する。
+            $expected = $basic + ['sort_order' => 10];
             $this->assertSame($expected, $validator->validated());
         }
     }

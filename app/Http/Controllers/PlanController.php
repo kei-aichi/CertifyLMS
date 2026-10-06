@@ -12,6 +12,7 @@ use App\Models\Plan;
 use App\UseCases\Plan\IndexAction;
 use App\UseCases\Plan\ShowAction;
 use App\UseCases\Plan\StoreAction;
+use App\UseCases\Plan\UpdateAction;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\View\View;
 
@@ -56,16 +57,19 @@ class PlanController extends Controller
         return view('plan.management.show', ['plan' => $action($plan)]);
     }
 
-    public function edit(Plan $plan): never
+    public function edit(Plan $plan): View
     {
         $this->authorize('update', $plan);
 
-        abort(501);
+        return view('plan.management.edit', compact('plan'));
     }
 
-    public function update(Plan $plan, UpdateRequest $request): never
+    public function update(Plan $plan, UpdateRequest $request, UpdateAction $action): RedirectResponse
     {
-        abort(501);
+        $plan = $action($plan, $request->user(), $request->validated());
+
+        return redirect()->route('admin.plans.show', $plan)
+            ->with('success', 'プランを更新しました。');
     }
 
     public function destroy(Plan $plan): never
