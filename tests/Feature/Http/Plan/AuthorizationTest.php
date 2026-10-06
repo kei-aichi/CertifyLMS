@@ -61,7 +61,7 @@ class AuthorizationTest extends TestCase
         $before = $plan->fresh()->getRawOriginal();
         $this->actingAs(User::factory()->admin()->create());
         foreach ($this->endpoints($plan) as [$method, $name, $parameters]) {
-            $expected = in_array($name, ['store', 'update'], true) ? 302 : (in_array($name, ['index', 'create', 'show', 'edit'], true) ? 200 : 501);
+            $expected = in_array($name, ['store', 'update', 'publish', 'archive', 'unarchive'], true) ? 302 : (in_array($name, ['index', 'create', 'show', 'edit'], true) ? 200 : 501);
             $this->json($method, route('admin.plans.'.$name, $parameters), $this->payload())->assertStatus($expected);
         }
         $this->assertDatabaseCount('plans', 2);
