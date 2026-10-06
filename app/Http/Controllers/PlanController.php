@@ -10,6 +10,7 @@ use App\Http\Requests\Plan\StoreRequest;
 use App\Http\Requests\Plan\UpdateRequest;
 use App\Models\Plan;
 use App\UseCases\Plan\IndexAction;
+use App\UseCases\Plan\ShowAction;
 use Illuminate\View\View;
 
 /**
@@ -43,11 +44,11 @@ class PlanController extends Controller
         abort(501);
     }
 
-    public function show(Plan $plan): never
+    public function show(Plan $plan, ShowAction $action): View
     {
         $this->authorize('view', $plan);
 
-        abort(501);
+        return view('plan.management.show', ['plan' => $action($plan)]);
     }
 
     public function edit(Plan $plan): never
