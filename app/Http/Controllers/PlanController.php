@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Enums\PlanStatus;
 use App\Http\Requests\Plan\IndexRequest;
 use App\Http\Requests\Plan\StoreRequest;
 use App\Http\Requests\Plan\UpdateRequest;
 use App\Models\Plan;
+use App\UseCases\Plan\IndexAction;
 use Illuminate\View\View;
 
 /**
@@ -16,9 +18,17 @@ use Illuminate\View\View;
  */
 class PlanController extends Controller
 {
-    public function index(IndexRequest $request): never
+    public function index(IndexRequest $request, IndexAction $action): View
     {
-        abort(501);
+        $validated = $request->validated();
+        $keyword = $validated['keyword'] ?? null;
+        $status = $validated['status'] ?? null;
+
+        return view('plan.management.index', [
+            'plans' => $action($keyword, $status !== null ? PlanStatus::from($status) : null),
+            'keyword' => $keyword,
+            'status' => $status,
+        ]);
     }
 
     public function create(): View
