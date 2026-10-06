@@ -10,6 +10,7 @@ use App\Http\Requests\Plan\StoreRequest;
 use App\Http\Requests\Plan\UpdateRequest;
 use App\Models\Plan;
 use App\UseCases\Plan\ArchiveAction;
+use App\UseCases\Plan\DestroyAction;
 use App\UseCases\Plan\IndexAction;
 use App\UseCases\Plan\PublishAction;
 use App\UseCases\Plan\ShowAction;
@@ -75,11 +76,14 @@ class PlanController extends Controller
             ->with('success', 'プランを更新しました。');
     }
 
-    public function destroy(Plan $plan): never
+    public function destroy(Plan $plan, DestroyAction $action): RedirectResponse
     {
         $this->authorize('delete', $plan);
 
-        abort(501);
+        $action($plan);
+
+        return redirect()->route('admin.plans.index')
+            ->with('success', 'プランを削除しました。');
     }
 
     public function publish(Plan $plan, PublishAction $action): RedirectResponse

@@ -10,7 +10,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 /**
- * 10 Route の認証・認可と Binding を検証する。PM回答待ちの操作は501で止まり、DBを変更しないことを保証する。
+ * 10 Route の認証・認可と Binding を検証する。管理操作はadminだけに許可する。
  */
 class AuthorizationTest extends TestCase
 {
@@ -21,9 +21,9 @@ class AuthorizationTest extends TestCase
         return [
             ['GET', 'index', []], ['GET', 'create', []], ['POST', 'store', []],
             ['GET', 'show', [$plan]], ['GET', 'edit', [$plan]],
-            ['PUT', 'update', [$plan]], ['DELETE', 'destroy', [$plan]],
+            ['PUT', 'update', [$plan]],
             ['POST', 'publish', [$plan]], ['POST', 'archive', [$plan]],
-            ['POST', 'unarchive', [$plan]],
+            ['POST', 'unarchive', [$plan]], ['DELETE', 'destroy', [$plan]],
         ];
     }
 
@@ -55,18 +55,16 @@ class AuthorizationTest extends TestCase
         $this->assertDatabaseCount('plans', 1);
     }
 
-    public function test_admin_passes_authorization_and_unimplemented_operations_do_not_change_existing_plan(): void
+    public function test_admin_can_access_every_endpoint(): void
     {
         $plan = Plan::factory()->create();
-        $before = $plan->fresh()->getRawOriginal();
         $this->actingAs(User::factory()->admin()->create());
         foreach ($this->endpoints($plan) as [$method, $name, $parameters]) {
-            $expected = in_array($name, ['store', 'update', 'publish', 'archive', 'unarchive'], true) ? 302 : (in_array($name, ['index', 'create', 'show', 'edit'], true) ? 200 : 501);
+            $expected = in_array($name, ['store', 'update', 'publish', 'archive', 'unarchive', 'destroy'], true) ? 302 : (in_array($name, ['index', 'create', 'show', 'edit'], true) ? 200 : 501);
             $this->json($method, route('admin.plans.'.$name, $parameters), $this->payload())->assertStatus($expected);
         }
-        $this->assertDatabaseCount('plans', 2);
-        $this->assertSame($before['status'], $plan->fresh()->getRawOriginal('status'));
-        $this->assertSame($before['created_by_user_id'], $plan->fresh()->getRawOriginal('created_by_user_id'));
+        $this->assertDatabaseCount('plans', 1);
+        $this->assertDatabaseMissing('plans', ['id' => $plan->id]);
     }
 
     public function test_bound_plan_must_exist(): void
