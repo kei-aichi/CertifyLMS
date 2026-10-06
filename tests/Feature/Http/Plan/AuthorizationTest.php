@@ -40,6 +40,7 @@ class AuthorizationTest extends TestCase
             $this->call($method, $url, $this->payload())->assertRedirect(route('login'));
             $this->json($method, $url, $this->payload())->assertUnauthorized();
         }
+        $this->assertDatabaseCount('plans', 1);
     }
 
     public function test_students_and_coaches_are_forbidden_on_every_endpoint(): void
@@ -51,17 +52,19 @@ class AuthorizationTest extends TestCase
                 $this->json($method, route('admin.plans.'.$name, $parameters), $this->payload())->assertForbidden();
             }
         }
+        $this->assertDatabaseCount('plans', 1);
     }
 
-    public function test_admin_passes_authorization_without_executing_business_operations(): void
+    public function test_admin_passes_authorization_and_unimplemented_operations_do_not_change_existing_plan(): void
     {
         $plan = Plan::factory()->create();
         $before = $plan->fresh()->getRawOriginal();
         $this->actingAs(User::factory()->admin()->create());
         foreach ($this->endpoints($plan) as [$method, $name, $parameters]) {
-            $this->json($method, route('admin.plans.'.$name, $parameters), $this->payload())->assertStatus(in_array($name, ['index', 'create', 'show'], true) ? 200 : 501);
+            $expected = $name === 'store' ? 302 : (in_array($name, ['index', 'create', 'show'], true) ? 200 : 501);
+            $this->json($method, route('admin.plans.'.$name, $parameters), $this->payload())->assertStatus($expected);
         }
-        $this->assertDatabaseCount('plans', 1);
+        $this->assertDatabaseCount('plans', 2);
         $this->assertSame($before, $plan->fresh()->getRawOriginal());
     }
 

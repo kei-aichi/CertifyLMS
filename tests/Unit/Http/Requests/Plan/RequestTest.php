@@ -62,8 +62,9 @@ class RequestTest extends TestCase
                 'updated_by_user_id' => 'forged',
             ], $request->rules());
 
-            // sort_order の許容範囲を仮決定せず、現段階では保存対象にしない。
-            $this->assertSame($basic, $validator->validated());
+            // 作成のみ並び順を受け付ける。更新入力は後続Stepまで変更しない。
+            $expected = $request instanceof StoreRequest ? $basic + ['sort_order' => 10] : $basic;
+            $this->assertSame($expected, $validator->validated());
         }
     }
 

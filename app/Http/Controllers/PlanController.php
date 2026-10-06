@@ -11,6 +11,8 @@ use App\Http\Requests\Plan\UpdateRequest;
 use App\Models\Plan;
 use App\UseCases\Plan\IndexAction;
 use App\UseCases\Plan\ShowAction;
+use App\UseCases\Plan\StoreAction;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\View\View;
 
 /**
@@ -39,9 +41,12 @@ class PlanController extends Controller
         return view('plan.management.create');
     }
 
-    public function store(StoreRequest $request): never
+    public function store(StoreRequest $request, StoreAction $action): RedirectResponse
     {
-        abort(501);
+        $plan = $action($request->user(), $request->validated());
+
+        return redirect()->route('admin.plans.show', $plan)
+            ->with('success', 'プランを作成しました。');
     }
 
     public function show(Plan $plan, ShowAction $action): View
