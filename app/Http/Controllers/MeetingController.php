@@ -6,6 +6,7 @@ namespace App\Http\Controllers;
 
 use App\Enums\EnrollmentStatus;
 use App\Enums\MeetingStatus;
+use App\Enums\UserStatus;
 use App\Exceptions\MeetingQuota\InsufficientMeetingQuotaException;
 use App\Exceptions\Mentoring\MeetingAlreadyStartedException;
 use App\Exceptions\Mentoring\MeetingNoAvailableCoachException;
@@ -20,6 +21,7 @@ use App\Models\Enrollment;
 use App\Models\Meeting;
 use App\Models\MeetingMemo;
 use App\Models\User;
+use App\Notifications\MeetingReservedNotification;
 use App\Services\CoachMeetingLoadService;
 use App\Services\MeetingAvailabilityService;
 use App\Services\MeetingQuotaService;
@@ -212,6 +214,15 @@ class MeetingController extends Controller
 
             $transaction = ($consumeAction)($student, $meeting->id);
             $meeting->update(['meeting_quota_transaction_id' => $transaction->id]);
+
+            DB::afterCommit(function () use ($meeting): void {
+                $meeting->loadMissing('coach');
+                $coach = $meeting->coach;
+
+                if ($coach !== null && $coach->status === UserStatus::InProgress) {
+                    $coach->notify(new MeetingReservedNotification($meeting));
+                }
+            });
 
             return $meeting->fresh();
         });
