@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace App\UseCases\Chat;
 
+use App\Enums\UserRole;
+use App\Enums\UserStatus;
 use App\Events\ChatMessageSent;
 use App\Models\ChatMember;
 use App\Models\ChatMessage;
 use App\Models\ChatRoom;
 use App\Models\User;
+use App\Notifications\ChatMessageReceivedNotification;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -40,9 +43,43 @@ final class StoreMessageAction
 
             DB::afterCommit(function () use ($message): void {
                 broadcast(new ChatMessageSent($message->load('sender')))->toOthers();
+                $this->notifyChatMembers($message);
             });
 
             return $message;
         });
+    }
+
+    private function notifyChatMembers(ChatMessage $message): void
+    {
+        $sender = $message->sender;
+
+        if ($sender === null || ! in_array($sender->role, [UserRole::Student, UserRole::Coach], true)) {
+            return;
+        }
+
+        $members = ChatMember::query()
+            ->where('chat_room_id', $message->chat_room_id)
+            ->where('user_id', '!=', $message->sender_user_id)
+            ->whereHas('user', function ($query) use ($sender): void {
+                $query
+                    ->where('status', UserStatus::InProgress->value)
+                    ->whereIn('role', $sender->role === UserRole::Student
+                        ? [UserRole::Coach->value]
+                        : [UserRole::Student->value, UserRole::Coach->value]);
+            })
+            ->with('user')
+            ->get();
+
+        foreach ($members as $member) {
+            $recipient = $member->user;
+
+            if ($recipient === null) {
+                continue;
+            }
+
+            $sendMail = $sender->role === UserRole::Student || $recipient->role === UserRole::Student;
+            $recipient->notify(new ChatMessageReceivedNotification($message, $sendMail));
+        }
     }
 }

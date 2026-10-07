@@ -87,6 +87,7 @@ class StoreMessageTest extends TestCase
             ->post(route('chat.storeMessage', $room), ['body' => '']);
 
         $response->assertSessionHasErrors('body');
+        $this->assertDatabaseCount('notifications', 0);
     }
 
     public function test_body_max_length(): void
