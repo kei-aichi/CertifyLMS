@@ -21,6 +21,7 @@ use App\Models\Enrollment;
 use App\Models\Meeting;
 use App\Models\MeetingMemo;
 use App\Models\User;
+use App\Notifications\MeetingCanceledNotification;
 use App\Notifications\MeetingReservedNotification;
 use App\Services\CoachMeetingLoadService;
 use App\Services\MeetingAvailabilityService;
@@ -259,6 +260,19 @@ class MeetingController extends Controller
                 'canceled_by_user_id' => $actor->id,
                 'canceled_at' => now(),
             ]);
+
+            DB::afterCommit(function () use ($locked, $actor): void {
+                $locked->loadMissing(['coach', 'student', 'canceledBy']);
+                $recipient = match ($actor->id) {
+                    $locked->student_id => $locked->coach,
+                    $locked->coach_id => $locked->student,
+                    default => null,
+                };
+
+                if ($recipient !== null && $recipient->status === UserStatus::InProgress) {
+                    $recipient->notify(new MeetingCanceledNotification($locked));
+                }
+            });
         });
 
         return redirect()
