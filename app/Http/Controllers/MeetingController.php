@@ -6,6 +6,7 @@ namespace App\Http\Controllers;
 
 use App\Enums\EnrollmentStatus;
 use App\Enums\MeetingStatus;
+use App\Enums\UserStatus;
 use App\Exceptions\MeetingQuota\InsufficientMeetingQuotaException;
 use App\Exceptions\Mentoring\MeetingAlreadyStartedException;
 use App\Exceptions\Mentoring\MeetingNoAvailableCoachException;
@@ -20,6 +21,8 @@ use App\Models\Enrollment;
 use App\Models\Meeting;
 use App\Models\MeetingMemo;
 use App\Models\User;
+use App\Notifications\MeetingCanceledNotification;
+use App\Notifications\MeetingReservedNotification;
 use App\Services\CoachMeetingLoadService;
 use App\Services\MeetingAvailabilityService;
 use App\Services\MeetingQuotaService;
@@ -213,6 +216,15 @@ class MeetingController extends Controller
             $transaction = ($consumeAction)($student, $meeting->id);
             $meeting->update(['meeting_quota_transaction_id' => $transaction->id]);
 
+            DB::afterCommit(function () use ($meeting): void {
+                $meeting->loadMissing('coach');
+                $coach = $meeting->coach;
+
+                if ($coach !== null && $coach->status === UserStatus::InProgress) {
+                    $coach->notify(new MeetingReservedNotification($meeting));
+                }
+            });
+
             return $meeting->fresh();
         });
 
@@ -248,6 +260,19 @@ class MeetingController extends Controller
                 'canceled_by_user_id' => $actor->id,
                 'canceled_at' => now(),
             ]);
+
+            DB::afterCommit(function () use ($locked, $actor): void {
+                $locked->loadMissing(['coach', 'student', 'canceledBy']);
+                $recipient = match ($actor->id) {
+                    $locked->student_id => $locked->coach,
+                    $locked->coach_id => $locked->student,
+                    default => null,
+                };
+
+                if ($recipient !== null && $recipient->status === UserStatus::InProgress) {
+                    $recipient->notify(new MeetingCanceledNotification($locked));
+                }
+            });
         });
 
         return redirect()
