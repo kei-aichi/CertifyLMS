@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace App\UseCases\QaReply;
 
+use App\Enums\UserStatus;
 use App\Models\QaReply;
 use App\Models\QaThread;
 use App\Models\User;
+use App\Notifications\QaReplyReceivedNotification;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 
@@ -23,7 +25,22 @@ final class StoreAction
             Gate::forUser($user)->authorize('create', [QaReply::class, $thread]);
 
             // 親をsave/touchしない。解決状態・解決日時・更新日時は質問自身の操作だけで変わる。
-            return $thread->replies()->create(['user_id' => $user->id, 'body' => $validated['body']]);
+            $reply = $thread->replies()->create(['user_id' => $user->id, 'body' => $validated['body']]);
+
+            DB::afterCommit(function () use ($reply): void {
+                $reply->loadMissing(['qaThread.user', 'user']);
+                $questionAuthor = $reply->qaThread?->user;
+
+                if ($questionAuthor === null
+                    || $questionAuthor->id === $reply->user_id
+                    || $questionAuthor->status !== UserStatus::InProgress) {
+                    return;
+                }
+
+                $questionAuthor->notify(new QaReplyReceivedNotification($reply));
+            });
+
+            return $reply;
         });
     }
 }
