@@ -44,7 +44,7 @@ final class ReplyNotificationTest extends TestCase
         $this->assertSame($coach->id, $notification->data['reply_user_id']);
         $this->assertSame('qa-board.show', $notification->data['redirect_route']);
         $this->assertSame(['thread' => $thread->id], $notification->data['redirect_parameters']);
-        $this->assertLessThanOrEqual(100, mb_strlen($notification->data['body_preview']));
+        $this->assertLessThanOrEqual(60, mb_strlen($notification->data['body_preview']));
     }
 
     public function test_self_reply_does_not_notify_question_author(): void

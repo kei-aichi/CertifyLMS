@@ -24,11 +24,13 @@ final class QaReplyReceivedNotification extends Notification
     /** @return array<string, mixed> */
     public function toArray(object $notifiable): array
     {
+        $body = trim($this->reply->body);
+
         return [
             'notification_type' => 'qa_reply_received',
             'title' => '質問に回答が投稿されました',
-            'message' => $this->reply->user?->name.'さんが質問に回答しました。',
-            'body_preview' => Str::limit(trim($this->reply->body), 100),
+            'message' => $this->reply->user?->name.'さんが回答しました: '.Str::limit($body, 100),
+            'body_preview' => Str::limit($body, 60),
             'qa_thread_id' => $this->reply->qa_thread_id,
             'qa_reply_id' => $this->reply->id,
             'reply_user_id' => $this->reply->user_id,
@@ -40,11 +42,13 @@ final class QaReplyReceivedNotification extends Notification
 
     public function toMail(object $notifiable): MailMessage
     {
+        $body = trim($this->reply->body);
+
         return (new MailMessage)
             ->subject('質問に回答が投稿されました')
             ->greeting($notifiable->name.'さん')
             ->line($this->reply->user?->name.'さんが質問に回答しました。')
-            ->line(Str::limit(trim($this->reply->body), 100))
+            ->line(Str::limit($body, 80))
             ->action('質問を確認する', route('qa-board.show', ['thread' => $this->reply->qa_thread_id]))
             ->salutation('Certify LMS 運営チーム');
     }
