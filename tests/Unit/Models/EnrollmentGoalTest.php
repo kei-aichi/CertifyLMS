@@ -89,4 +89,49 @@ class EnrollmentGoalTest extends TestCase
         $enrollment->forceDelete();
         $this->assertDatabaseMissing('enrollment_goals', ['id' => $goal->id]);
     }
+
+    public function test_display_order_places_dated_goals_before_undated_goals_for_each_state_and_breaks_id_ties(): void
+    {
+        $enrollment = Enrollment::factory()->learning()->create();
+        $createdAt = '2026-10-08 10:00:00';
+
+        $undatedUnachieved = EnrollmentGoal::factory()->forEnrollment($enrollment)->create([
+            'id' => '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+            'title' => 'undated unachieved',
+            'target_date' => null,
+            'created_at' => $createdAt,
+        ]);
+        $datedUnachieved = EnrollmentGoal::factory()->forEnrollment($enrollment)->create([
+            'id' => '01ARZ3NDEKTSV4RRFFQ69G5FAW',
+            'title' => 'dated unachieved',
+            'target_date' => '2026-10-10',
+            'created_at' => $createdAt,
+        ]);
+        $sameTargetLower = EnrollmentGoal::factory()->forEnrollment($enrollment)->create([
+            'id' => '01ARZ3NDEKTSV4RRFFQ69G5FAS',
+            'title' => 'same target lower id',
+            'target_date' => '2026-10-10',
+            'created_at' => $createdAt,
+        ]);
+        $undatedAchieved = EnrollmentGoal::factory()->forEnrollment($enrollment)->achieved()->create([
+            'id' => '01ARZ3NDEKTSV4RRFFQ69G5FAX',
+            'title' => 'undated achieved',
+            'target_date' => null,
+            'created_at' => $createdAt,
+        ]);
+        $datedAchieved = EnrollmentGoal::factory()->forEnrollment($enrollment)->achieved()->create([
+            'id' => '01ARZ3NDEKTSV4RRFFQ69G5FAY',
+            'title' => 'dated achieved',
+            'target_date' => '2026-10-10',
+            'created_at' => $createdAt,
+        ]);
+
+        $this->assertSame([
+            $datedUnachieved->id,
+            $sameTargetLower->id,
+            $undatedUnachieved->id,
+            $datedAchieved->id,
+            $undatedAchieved->id,
+        ], $enrollment->goals()->displayOrder()->pluck('id')->all());
+    }
 }
