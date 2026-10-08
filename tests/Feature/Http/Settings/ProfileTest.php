@@ -7,6 +7,7 @@ namespace Tests\Feature\Http\Settings;
 use App\Enums\UserRole;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Hash;
 use Tests\TestCase;
 
 final class ProfileTest extends TestCase
@@ -201,6 +202,99 @@ final class ProfileTest extends TestCase
     {
         $this->patch(route('settings.profile.update'), ['name' => 'New name'])
             ->assertRedirect(route('login'));
+    }
+
+    public function test_all_roles_and_graduated_student_can_change_password(): void
+    {
+        $users = [
+            User::factory()->student()->create(),
+            User::factory()->coach()->create(),
+            User::factory()->admin()->create(),
+            User::factory()->graduated()->create(),
+        ];
+
+        foreach ($users as $user) {
+            $this->actingAs($user)
+                ->put(route('settings.password.update'), [
+                    'current_password' => 'password',
+                    'password' => 'new-password-123',
+                    'password_confirmation' => 'new-password-123',
+                ])
+                ->assertRedirect(route('settings.profile.edit', ['tab' => 'password']))
+                ->assertSessionHas('success', 'パスワードを変更しました。');
+
+            $this->assertTrue(Hash::check('new-password-123', $user->refresh()->password));
+        }
+    }
+
+    public function test_eight_character_password_replaces_old_password(): void
+    {
+        $user = User::factory()->create();
+
+        $this->actingAs($user)
+            ->put(route('settings.password.update'), [
+                'current_password' => 'password',
+                'password' => 'Abcdef12',
+                'password_confirmation' => 'Abcdef12',
+            ])
+            ->assertRedirect(route('settings.profile.edit', ['tab' => 'password']))
+            ->assertSessionHas('success', 'パスワードを変更しました。');
+
+        $hash = $user->refresh()->password;
+        $this->assertFalse(Hash::check('password', $hash));
+        $this->assertTrue(Hash::check('Abcdef12', $hash));
+    }
+
+    /** @dataProvider invalidPasswordInputs */
+    public function test_invalid_password_input_keeps_database_password_and_uses_password_error_bag(array $input): void
+    {
+        $user = User::factory()->create();
+        $originalHash = $user->password;
+        $passwordUrl = route('settings.profile.edit', ['tab' => 'password']);
+
+        $this->actingAs($user)
+            ->from($passwordUrl)
+            ->put(route('settings.password.update'), $input)
+            ->assertRedirect($passwordUrl)
+            ->assertSessionHas('errors');
+
+        $errors = session('errors');
+        $this->assertTrue($errors->getBag('updatePassword')->any());
+        $this->assertSame($originalHash, $user->refresh()->password);
+    }
+
+    /** @return array<string, array{0: array<string, string>}> */
+    public static function invalidPasswordInputs(): array
+    {
+        return [
+            'current password missing' => [[
+                'password' => 'new-password-123',
+                'password_confirmation' => 'new-password-123',
+            ]],
+            'current password mismatch' => [[
+                'current_password' => 'wrong-password',
+                'password' => 'new-password-123',
+                'password_confirmation' => 'new-password-123',
+            ]],
+            'new password missing' => [[
+                'current_password' => 'password',
+                'password_confirmation' => '',
+            ]],
+            'new password too short' => [[
+                'current_password' => 'password',
+                'password' => '1234567',
+                'password_confirmation' => '1234567',
+            ]],
+            'confirmation missing' => [[
+                'current_password' => 'password',
+                'password' => 'new-password-123',
+            ]],
+            'confirmation mismatch' => [[
+                'current_password' => 'password',
+                'password' => 'new-password-123',
+                'password_confirmation' => 'different-password',
+            ]],
+        ];
     }
 
     public function test_other_user_is_not_updated(): void

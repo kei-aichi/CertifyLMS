@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Settings;
 
+use App\Actions\Fortify\UpdateUserPassword;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Settings\ProfileUpdateRequest;
 use App\UseCases\Settings\UpdateProfileAction;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
 
 final class ProfileController extends Controller
 {
@@ -36,8 +38,15 @@ final class ProfileController extends Controller
         abort(501);
     }
 
-    public function updatePassword(): never
+    public function updatePassword(Request $request, UpdateUserPassword $action): RedirectResponse
     {
-        abort(501);
+        $action->update($request->user(), $request->only([
+            'current_password',
+            'password',
+            'password_confirmation',
+        ]));
+
+        return redirect()->route('settings.profile.edit', ['tab' => 'password'])
+            ->with('success', 'パスワードを変更しました。');
     }
 }
