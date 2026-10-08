@@ -84,4 +84,133 @@ final class ProfileTest extends TestCase
             ->assertSeeText('パスワード変更')
             ->assertSee('name="current_password"', false);
     }
+
+    public function test_user_can_update_name_and_bio_without_changing_managed_fields(): void
+    {
+        $user = User::factory()->coach()->create([
+            'name' => 'Before',
+            'bio' => 'Old bio',
+            'meeting_url' => 'https://example.test/meeting',
+        ]);
+        $original = $user->only(['email', 'role', 'status', 'password', 'avatar_url', 'meeting_url']);
+
+        $this->actingAs($user)
+            ->patch(route('settings.profile.update'), [
+                'name' => 'After',
+                'bio' => 'New bio',
+                'email' => 'attacker@example.test',
+                'role' => UserRole::Admin->value,
+                'status' => 'graduated',
+                'password' => 'attacker-password',
+                'avatar_url' => 'https://attacker.test/avatar.png',
+                'meeting_url' => 'https://attacker.test/meeting',
+            ])
+            ->assertRedirect(route('settings.profile.edit'))
+            ->assertSessionHas('success', 'プロフィールを更新しました。');
+
+        $user->refresh();
+        $this->assertSame('After', $user->name);
+        $this->assertSame('New bio', $user->bio);
+        $this->assertSame($original, $user->only(array_keys($original)));
+    }
+
+    public function test_all_roles_and_graduated_student_can_update_profile(): void
+    {
+        $users = [
+            User::factory()->student()->create(),
+            User::factory()->coach()->create(),
+            User::factory()->admin()->create(),
+            User::factory()->graduated()->create(),
+        ];
+
+        foreach ($users as $user) {
+            $this->actingAs($user)
+                ->patch(route('settings.profile.update'), [
+                    'name' => str_repeat('名', 50),
+                    'bio' => str_repeat('紹', 1000),
+                ])
+                ->assertRedirect(route('settings.profile.edit'));
+
+            $user->refresh();
+            $this->assertSame(str_repeat('名', 50), $user->name);
+            $this->assertSame(str_repeat('紹', 1000), $user->bio);
+        }
+    }
+
+    public function test_blank_bio_is_saved_as_null(): void
+    {
+        $user = User::factory()->create(['bio' => 'Existing']);
+
+        $this->actingAs($user)
+            ->patch(route('settings.profile.update'), ['name' => $user->name, 'bio' => ''])
+            ->assertRedirect(route('settings.profile.edit'));
+
+        $this->assertNull($user->refresh()->bio);
+    }
+
+    /** @dataProvider invalidNamePayloads */
+    public function test_missing_or_blank_name_is_rejected_and_keeps_database_value(array $payload): void
+    {
+        $user = User::factory()->create(['name' => 'Original']);
+
+        $this->actingAs($user)
+            ->from(route('settings.profile.edit'))
+            ->patch(route('settings.profile.update'), $payload)
+            ->assertRedirect(route('settings.profile.edit'))
+            ->assertSessionHasErrors('name');
+
+        $this->assertSame('Original', $user->refresh()->name);
+    }
+
+    /** @return array<string, array{0: array<string, string>}> */
+    public static function invalidNamePayloads(): array
+    {
+        return [
+            'missing' => [['bio' => 'Bio']],
+            'empty' => [['name' => '', 'bio' => 'Bio']],
+            'whitespace only' => [['name' => '   ', 'bio' => 'Bio']],
+        ];
+    }
+
+    /** @dataProvider invalidProfileInputs */
+    public function test_profile_validation_rejects_invalid_input(string $field, mixed $value): void
+    {
+        $user = User::factory()->create(['name' => 'Original', 'bio' => 'Original bio']);
+
+        $this->actingAs($user)
+            ->from(route('settings.profile.edit'))
+            ->patch(route('settings.profile.update'), ['name' => $user->name, 'bio' => $user->bio, $field => $value])
+            ->assertRedirect(route('settings.profile.edit'))
+            ->assertSessionHasErrors($field);
+
+        $this->assertSame('Original', $user->refresh()->name);
+        $this->assertSame('Original bio', $user->bio);
+    }
+
+    /** @return array<string, array{0: string, 1: mixed}> */
+    public static function invalidProfileInputs(): array
+    {
+        return [
+            'missing name' => ['name', ''],
+            'name over limit' => ['name', str_repeat('a', 51)],
+            'bio over limit' => ['bio', str_repeat('a', 1001)],
+        ];
+    }
+
+    public function test_guest_cannot_update_profile(): void
+    {
+        $this->patch(route('settings.profile.update'), ['name' => 'New name'])
+            ->assertRedirect(route('login'));
+    }
+
+    public function test_other_user_is_not_updated(): void
+    {
+        $user = User::factory()->create(['name' => 'Owner']);
+        $other = User::factory()->create(['name' => 'Other']);
+
+        $this->actingAs($user)->patch(route('settings.profile.update'), ['name' => 'Changed']);
+
+        $this->assertSame('Changed', $user->refresh()->name);
+        $this->assertSame('Other', $other->refresh()->name);
+    }
 }
