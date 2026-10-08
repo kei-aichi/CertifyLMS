@@ -6,7 +6,10 @@ namespace App\Http\Controllers\Settings;
 
 use App\Actions\Fortify\UpdateUserPassword;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Settings\AvatarStoreRequest;
 use App\Http\Requests\Settings\ProfileUpdateRequest;
+use App\UseCases\Settings\DestroyAvatarAction;
+use App\UseCases\Settings\StoreAvatarAction;
 use App\UseCases\Settings\UpdateProfileAction;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\RedirectResponse;
@@ -28,14 +31,18 @@ final class ProfileController extends Controller
         return redirect()->route('settings.profile.edit')->with('success', 'プロフィールを更新しました。');
     }
 
-    public function storeAvatar(): never
+    public function storeAvatar(AvatarStoreRequest $request, StoreAvatarAction $action): RedirectResponse
     {
-        abort(501);
+        $action($request->user(), $request->file('avatar'));
+
+        return redirect()->route('settings.profile.edit')->with('success', 'アイコン画像を更新しました。');
     }
 
-    public function destroyAvatar(): never
+    public function destroyAvatar(Request $request, DestroyAvatarAction $action): RedirectResponse
     {
-        abort(501);
+        $action($request->user());
+
+        return redirect()->route('settings.profile.edit')->with('success', 'アイコン画像を削除しました。');
     }
 
     public function updatePassword(Request $request, UpdateUserPassword $action): RedirectResponse

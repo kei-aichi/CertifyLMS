@@ -6,8 +6,14 @@ namespace Tests\Feature\Http\Settings;
 
 use App\Enums\UserRole;
 use App\Models\User;
+use App\UseCases\Settings\DestroyAvatarAction;
+use App\UseCases\Settings\StoreAvatarAction;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
+use Mockery;
 use Tests\TestCase;
 
 final class ProfileTest extends TestCase
@@ -306,5 +312,140 @@ final class ProfileTest extends TestCase
 
         $this->assertSame('Changed', $user->refresh()->name);
         $this->assertSame('Other', $other->refresh()->name);
+    }
+
+    public function test_all_roles_and_graduated_student_can_upload_avatar(): void
+    {
+        Storage::fake('public');
+        $users = [
+            User::factory()->student()->create(), User::factory()->coach()->create(),
+            User::factory()->admin()->create(), User::factory()->graduated()->create(),
+        ];
+
+        foreach ($users as $user) {
+            $this->actingAs($user)->post(route('settings.avatar.store'), [
+                'avatar' => UploadedFile::fake()->image('avatar.png'),
+            ])->assertRedirect(route('settings.profile.edit'));
+            $url = $user->refresh()->avatar_url;
+            $path = ltrim(str_replace('/storage/', '', (string) parse_url($url, PHP_URL_PATH)), '/');
+            Storage::disk('public')->assertExists($path);
+        }
+    }
+
+    public function test_avatar_validation_rejects_invalid_type_and_oversized_file(): void
+    {
+        Storage::fake('public');
+        $user = User::factory()->create();
+
+        $this->actingAs($user)->from(route('settings.profile.edit'))->post(route('settings.avatar.store'), [
+            'avatar' => UploadedFile::fake()->create('avatar.svg', 10, 'image/svg+xml'),
+        ])->assertRedirect(route('settings.profile.edit'))->assertSessionHasErrors('avatar');
+
+        $this->actingAs($user)->post(route('settings.avatar.store'), [
+            'avatar' => UploadedFile::fake()->create('avatar.png', 2048, 'image/png'),
+        ])->assertRedirect(route('settings.profile.edit'));
+        $savedUrl = $user->refresh()->avatar_url;
+        $this->assertNotNull($savedUrl);
+
+        $this->actingAs($user)->from(route('settings.profile.edit'))->post(route('settings.avatar.store'), [
+            'avatar' => UploadedFile::fake()->create('avatar.png', 2049, 'image/png'),
+        ])->assertRedirect(route('settings.profile.edit'))->assertSessionHasErrors('avatar');
+        $this->assertSame($savedUrl, $user->refresh()->avatar_url);
+    }
+
+    public function test_avatar_replacement_deletes_old_file_and_delete_clears_avatar(): void
+    {
+        Storage::fake('public');
+        $user = User::factory()->create();
+        $this->actingAs($user)->post(route('settings.avatar.store'), ['avatar' => UploadedFile::fake()->image('old.jpg')]);
+        $oldPath = ltrim(str_replace('/storage/', '', (string) parse_url($user->refresh()->avatar_url, PHP_URL_PATH)), '/');
+        Storage::disk('public')->assertExists($oldPath);
+
+        $this->actingAs($user)->post(route('settings.avatar.store'), ['avatar' => UploadedFile::fake()->image('new.webp')]);
+        $newPath = ltrim(str_replace('/storage/', '', (string) parse_url($user->refresh()->avatar_url, PHP_URL_PATH)), '/');
+        Storage::disk('public')->assertMissing($oldPath);
+        Storage::disk('public')->assertExists($newPath);
+
+        $this->actingAs($user)->delete(route('settings.avatar.destroy'))
+            ->assertRedirect(route('settings.profile.edit'));
+        $this->assertNull($user->refresh()->avatar_url);
+        Storage::disk('public')->assertMissing($newPath);
+    }
+
+    public function test_avatar_delete_without_existing_file_is_safe_and_guest_is_rejected(): void
+    {
+        Storage::fake('public');
+        $user = User::factory()->create();
+        $this->actingAs($user)->delete(route('settings.avatar.destroy'))
+            ->assertRedirect(route('settings.profile.edit'));
+        $this->assertNull($user->refresh()->avatar_url);
+        Auth::logout();
+        $this->delete(route('settings.avatar.destroy'))->assertRedirect(route('login'));
+    }
+
+    public function test_upload_db_failure_removes_new_file_and_preserves_existing_avatar(): void
+    {
+        Storage::fake('public');
+        $user = Mockery::mock(User::class)->makePartial();
+        $user->id = '01h00000000000000000000000';
+        $oldPath = "avatars/{$user->id}/old.png";
+        $user->avatar_url = Storage::disk('public')->url($oldPath);
+        Storage::disk('public')->put($oldPath, 'old');
+        $user->shouldReceive('update')->once()->andThrow(new \RuntimeException('db failure'));
+
+        try {
+            (new StoreAvatarAction)($user, UploadedFile::fake()->image('new.png'));
+            $this->fail('Expected the database failure to be rethrown.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('db failure', $exception->getMessage());
+        }
+
+        Storage::disk('public')->assertExists($oldPath);
+        $this->assertSame([$oldPath], Storage::disk('public')->allFiles());
+    }
+
+    public function test_delete_db_failure_preserves_existing_avatar_and_file(): void
+    {
+        Storage::fake('public');
+        $user = Mockery::mock(User::class)->makePartial();
+        $user->id = '01h00000000000000000000000';
+        $path = "avatars/{$user->id}/avatar.png";
+        $user->avatar_url = Storage::disk('public')->url($path);
+        Storage::disk('public')->put($path, 'avatar');
+        $user->shouldReceive('update')->once()->andThrow(new \RuntimeException('db failure'));
+
+        try {
+            (new DestroyAvatarAction)($user);
+            $this->fail('Expected the database failure to be rethrown.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('db failure', $exception->getMessage());
+        }
+
+        Storage::disk('public')->assertExists($path);
+        $this->assertSame(Storage::disk('public')->url($path), $user->avatar_url);
+    }
+
+    public function test_delete_does_not_remove_other_users_or_unmanaged_avatar_files(): void
+    {
+        Storage::fake('public');
+        $user = User::factory()->create();
+        $other = User::factory()->create();
+        $paths = [
+            "avatars/{$other->id}/avatar.png",
+            'misc/avatar.png',
+        ];
+
+        foreach ($paths as $path) {
+            Storage::disk('public')->put($path, 'avatar');
+            $user->update(['avatar_url' => Storage::disk('public')->url($path)]);
+            $this->actingAs($user)->delete(route('settings.avatar.destroy'))
+                ->assertRedirect(route('settings.profile.edit'));
+            Storage::disk('public')->assertExists($path);
+        }
+
+        $user->update(['avatar_url' => 'https://external.example/avatar.png']);
+        $this->actingAs($user)->delete(route('settings.avatar.destroy'))
+            ->assertRedirect(route('settings.profile.edit'));
+        $this->assertNull($user->refresh()->avatar_url);
     }
 }
