@@ -58,6 +58,20 @@ class EnrollmentControllerTest extends TestCase
         $response->assertForbidden();
     }
 
+    public function test_show_forbids_student_status_other_than_in_progress(): void
+    {
+        $certification = Certification::factory()->published()->create();
+
+        foreach (['invited', 'graduated', 'withdrawn'] as $status) {
+            $student = User::factory()->student()->state(['status' => $status])->create();
+            $enrollment = Enrollment::factory()->for($student)->for($certification)->learning()->create();
+
+            $this->actingAs($student)
+                ->get(route('enrollments.show', $enrollment))
+                ->assertForbidden();
+        }
+    }
+
     public function test_store_creates_enrollment_for_published_certification(): void
     {
         $student = User::factory()->student()->inProgress()->create();
