@@ -9,10 +9,12 @@ use App\Models\Meeting;
 use App\Models\User;
 use App\UseCases\Settings\DestroyAvatarAction;
 use App\UseCases\Settings\StoreAvatarAction;
+use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
 use Mockery;
@@ -527,19 +529,221 @@ final class ProfileTest extends TestCase
         );
 
         $this->actingAs($user)->post(route('settings.avatar.store'), [
-            'avatar' => UploadedFile::fake()->create('avatar.png', 2048, 'image/png'),
+            'avatar' => UploadedFile::fake()->image('avatar.png')->size(2048),
         ])->assertRedirect(route('settings.profile.edit'));
         $savedUrl = $user->refresh()->avatar_url;
         $this->assertNotNull($savedUrl);
 
         $this->actingAs($user)->from(route('settings.profile.edit'))->post(route('settings.avatar.store'), [
-            'avatar' => UploadedFile::fake()->create('avatar.png', 2049, 'image/png'),
+            'avatar' => UploadedFile::fake()->image('avatar.png')->size(2049),
         ])->assertRedirect(route('settings.profile.edit'))->assertSessionHasErrors('avatar');
         $this->assertStringContainsString(
             'アバター画像',
             session('errors')->getBag('default')->first('avatar'),
         );
         $this->assertSame($savedUrl, $user->refresh()->avatar_url);
+    }
+
+    public function test_avatar_validation_accepts_png_jpeg_and_webp_images(): void
+    {
+        Storage::fake('public');
+        $user = User::factory()->create();
+
+        foreach (['png', 'jpg', 'jpeg', 'webp'] as $extension) {
+            $this->actingAs($user)->post(route('settings.avatar.store'), [
+                'avatar' => UploadedFile::fake()->image("avatar.{$extension}"),
+            ])->assertRedirect(route('settings.profile.edit'))->assertSessionDoesntHaveErrors('avatar');
+        }
+    }
+
+    public function test_avatar_validation_rejects_non_image_disguised_as_png(): void
+    {
+        Storage::fake('public');
+        $user = User::factory()->create();
+        $tempFile = tmpfile();
+        fwrite($tempFile, 'not an image');
+        $path = stream_get_meta_data($tempFile)['uri'];
+        $disguisedFile = new UploadedFile($path, 'avatar.png', 'image/png', UPLOAD_ERR_OK, true);
+
+        $this->actingAs($user)->from(route('settings.profile.edit'))->post(route('settings.avatar.store'), [
+            'avatar' => $disguisedFile,
+        ])->assertRedirect(route('settings.profile.edit'))->assertSessionHasErrors('avatar');
+
+        $this->assertNull($user->refresh()->avatar_url);
+        $this->assertSame([], Storage::disk('public')->allFiles());
+    }
+
+    public function test_avatar_storage_failure_does_not_update_database_or_return_success_flash(): void
+    {
+        $user = User::factory()->create(['avatar_url' => '/storage/avatars/existing/old.png']);
+        $disk = Mockery::mock(Filesystem::class);
+        $disk->shouldReceive('putFileAs')->once()->andReturn(false);
+        $disk->shouldNotReceive('delete');
+        Storage::shouldReceive('disk')->with('public')->andReturn($disk);
+
+        $this->actingAs($user)->post(route('settings.avatar.store'), [
+            'avatar' => UploadedFile::fake()->image('new.png'),
+        ])->assertServerError()->assertSessionMissing('success');
+
+        $this->assertSame('/storage/avatars/existing/old.png', $user->refresh()->avatar_url);
+    }
+
+    /** @dataProvider storageDeleteFailures */
+    public function test_avatar_replacement_keeps_new_reference_when_old_file_deletion_fails(string $failure): void
+    {
+        $user = User::factory()->create();
+        $oldPath = "avatars/{$user->id}/old.png";
+        $user->update(['avatar_url' => "/storage/{$oldPath}"]);
+        $disk = Mockery::mock(Filesystem::class);
+        $disk->shouldReceive('putFileAs')->once()->andReturnUsing(
+            fn (string $directory, UploadedFile $file, string $name): string => "{$directory}/{$name}",
+        );
+        $disk->shouldReceive('url')->once()->andReturnUsing(fn (string $path): string => "/storage/{$path}");
+        $delete = $disk->shouldReceive('delete')->once()->with($oldPath);
+        $failure === 'false'
+            ? $delete->andReturn(false)
+            : $delete->andThrow(new \RuntimeException('storage delete failure'));
+        Storage::shouldReceive('disk')->with('public')->andReturn($disk);
+        Log::shouldReceive('warning')->once();
+
+        $updated = (new StoreAvatarAction)($user, UploadedFile::fake()->image('new.png'));
+
+        $this->assertNotSame("/storage/{$oldPath}", $updated->avatar_url);
+        $this->assertSame($updated->avatar_url, $user->refresh()->avatar_url);
+    }
+
+    /** @dataProvider storageDeleteFailures */
+    public function test_avatar_delete_keeps_null_database_value_when_file_deletion_fails(string $failure): void
+    {
+        $user = User::factory()->create();
+        $oldPath = "avatars/{$user->id}/old.png";
+        $user->update(['avatar_url' => "/storage/{$oldPath}"]);
+        $disk = Mockery::mock(Filesystem::class);
+        $delete = $disk->shouldReceive('delete')->once()->with($oldPath);
+        $failure === 'false'
+            ? $delete->andReturn(false)
+            : $delete->andThrow(new \RuntimeException('storage delete failure'));
+        Storage::shouldReceive('disk')->with('public')->andReturn($disk);
+        Log::shouldReceive('warning')->once();
+
+        $updated = (new DestroyAvatarAction)($user);
+
+        $this->assertNull($updated->avatar_url);
+        $this->assertNull($user->refresh()->avatar_url);
+    }
+
+    /** @return array<string, array{0: string}> */
+    public static function storageDeleteFailures(): array
+    {
+        return [
+            'returns false' => ['false'],
+            'throws exception' => ['exception'],
+        ];
+    }
+
+    /** @dataProvider concurrentAvatarInterleavings */
+    public function test_concurrent_avatar_replacements_keep_final_reference_and_other_users_file(
+        bool $secondRequestUsesStaleAvatar,
+        string $firstCleanupFailure,
+    ): void {
+        $user = User::factory()->create();
+        $other = User::factory()->create();
+        $initialPath = "avatars/{$user->id}/initial.png";
+        $otherPath = "avatars/{$other->id}/avatar.png";
+        $user->update(['avatar_url' => "/storage/{$initialPath}"]);
+
+        // Both request models are materialized before R1 updates the database when stale mode is used.
+        $requestOneUser = User::query()->findOrFail($user->id);
+        $requestTwoStaleUser = User::query()->findOrFail($user->id);
+        $files = [$initialPath => true, $otherPath => true];
+        $deleteCalls = 0;
+        $requestTwoResult = null;
+        $disk = Mockery::mock(Filesystem::class);
+        $disk->shouldReceive('putFileAs')->twice()->andReturnUsing(
+            function (string $directory, UploadedFile $file, string $name) use (&$files): string {
+                $path = "{$directory}/{$name}";
+                $files[$path] = true;
+
+                return $path;
+            },
+        );
+        $disk->shouldReceive('url')->twice()->andReturnUsing(fn (string $path): string => "/storage/{$path}");
+        $disk->shouldReceive('delete')->twice()->andReturnUsing(
+            function (string $path) use (
+                &$deleteCalls,
+                &$files,
+                &$requestTwoResult,
+                $secondRequestUsesStaleAvatar,
+                $firstCleanupFailure,
+                $requestTwoStaleUser,
+                $user,
+            ): bool {
+                $currentDelete = ++$deleteCalls;
+
+                // Interleave R2 after R1 committed B but before R1 finishes deleting A.
+                if ($currentDelete === 1) {
+                    $requestTwoUser = $secondRequestUsesStaleAvatar
+                        ? $requestTwoStaleUser
+                        : User::query()->findOrFail($user->id);
+                    $requestTwoResult = (new StoreAvatarAction)(
+                        $requestTwoUser,
+                        UploadedFile::fake()->image('request-two.png'),
+                    );
+                }
+
+                if ($currentDelete === 1 && $firstCleanupFailure === 'false') {
+                    return false;
+                }
+                if ($currentDelete === 1 && $firstCleanupFailure === 'exception') {
+                    throw new \RuntimeException('request one cleanup failure');
+                }
+
+                unset($files[$path]);
+
+                return true;
+            },
+        );
+        Storage::shouldReceive('disk')->with('public')->andReturn($disk);
+        if ($firstCleanupFailure === 'none') {
+            Log::shouldReceive('warning')->never();
+        } else {
+            Log::shouldReceive('warning')->once();
+        }
+
+        $requestOneResult = (new StoreAvatarAction)(
+            $requestOneUser,
+            UploadedFile::fake()->image('request-one.png'),
+        );
+
+        $finalUrl = $user->refresh()->avatar_url;
+        $finalPath = ltrim(str_replace('/storage/', '', (string) parse_url($finalUrl, PHP_URL_PATH)), '/');
+        $requestOnePath = ltrim(str_replace('/storage/', '', (string) parse_url($requestOneResult->avatar_url, PHP_URL_PATH)), '/');
+
+        $this->assertNotNull($requestTwoResult);
+        $this->assertSame($requestTwoResult->avatar_url, $finalUrl);
+        $this->assertArrayHasKey($finalPath, $files, 'The final database reference must point to an existing file.');
+        $this->assertArrayHasKey($otherPath, $files, 'Another user\'s avatar must not be deleted.');
+
+        if ($secondRequestUsesStaleAvatar) {
+            $this->assertArrayHasKey(
+                $requestOnePath,
+                $files,
+                'When both requests capture A, the superseded B file remains orphaned.',
+            );
+        } else {
+            $this->assertArrayNotHasKey($requestOnePath, $files, 'R2 must remove B after replacing it with C.');
+        }
+    }
+
+    /** @return array<string, array{0: bool, 1: string}> */
+    public static function concurrentAvatarInterleavings(): array
+    {
+        return [
+            'both requests capture A before database updates' => [true, 'none'],
+            'R2 captures B while R1 is deleting A' => [false, 'none'],
+            'R1 deletion returns false while R2 replaces B with C' => [false, 'false'],
+            'R1 deletion throws while R2 replaces B with C' => [false, 'exception'],
+        ];
     }
 
     public function test_avatar_replacement_deletes_old_file_and_delete_clears_avatar(): void

@@ -6,6 +6,7 @@ namespace App\UseCases\Settings;
 
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
 final class DestroyAvatarAction
@@ -20,7 +21,7 @@ final class DestroyAvatarAction
         });
         $path = $this->managedPath($oldUrl, $user);
         if ($path !== null) {
-            Storage::disk('public')->delete($path);
+            $this->deleteManagedFile($path, $user);
         }
 
         return $updated;
@@ -35,5 +36,25 @@ final class DestroyAvatarAction
         $path = str_starts_with($path, 'storage/') ? substr($path, 8) : $path;
 
         return str_starts_with($path, "avatars/{$user->id}/") ? $path : null;
+    }
+
+    private function deleteManagedFile(string $path, User $user): void
+    {
+        try {
+            if (! Storage::disk('public')->delete($path)) {
+                Log::warning('Failed to delete a managed avatar file.', [
+                    'user_id' => $user->id,
+                    'operation' => 'deleted_avatar_cleanup',
+                    'path' => $path,
+                ]);
+            }
+        } catch (\Throwable $exception) {
+            Log::warning('Failed to delete a managed avatar file.', [
+                'user_id' => $user->id,
+                'operation' => 'deleted_avatar_cleanup',
+                'path' => $path,
+                'exception' => $exception,
+            ]);
+        }
     }
 }

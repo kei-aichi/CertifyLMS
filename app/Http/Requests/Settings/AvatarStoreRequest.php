@@ -16,7 +16,7 @@ final class AvatarStoreRequest extends FormRequest
     /** @return array<string, array<int, mixed>> */
     public function rules(): array
     {
-        return ['avatar' => ['required', 'file', 'mimes:png,jpg,jpeg,webp', 'max:2048']];
+        return ['avatar' => ['required', 'image', 'mimes:png,jpg,jpeg,webp', 'max:2048']];
     }
 
     /** @return array<string, string> */
