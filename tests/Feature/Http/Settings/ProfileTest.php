@@ -13,6 +13,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
 use Mockery;
 use Tests\TestCase;
@@ -401,6 +402,20 @@ final class ProfileTest extends TestCase
 
         $this->assertSame('Changed', $user->refresh()->name);
         $this->assertSame('Other', $other->refresh()->name);
+    }
+
+    public function test_fortify_profile_information_route_is_disabled(): void
+    {
+        $this->assertFalse(Route::has('user-profile-information.update'));
+
+        $user = User::factory()->create(['email' => 'original@example.test']);
+        $response = $this->actingAs($user)->put('/user/profile-information', [
+            'name' => 'Changed through old route',
+            'email' => 'changed@example.test',
+        ]);
+
+        $this->assertNotSame(200, $response->getStatusCode());
+        $this->assertSame('original@example.test', $user->refresh()->email);
     }
 
     public function test_all_roles_and_graduated_student_can_upload_avatar(): void
