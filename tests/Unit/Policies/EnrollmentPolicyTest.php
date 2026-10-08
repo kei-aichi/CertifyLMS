@@ -36,6 +36,18 @@ class EnrollmentPolicyTest extends TestCase
         $this->assertFalse($policy->view($other, $enrollment), '他人の enrollment は view 不可');
     }
 
+    public function test_student_view_requires_in_progress_status(): void
+    {
+        $policy = new EnrollmentPolicy;
+
+        foreach (['invited', 'graduated', 'withdrawn'] as $status) {
+            $student = User::factory()->student()->state(['status' => $status])->create();
+            $enrollment = Enrollment::factory()->for($student)->learning()->create();
+
+            $this->assertFalse($policy->view($student, $enrollment));
+        }
+    }
+
     public function test_coach_can_view_only_assigned_certification(): void
     {
         $coach = User::factory()->coach()->create();

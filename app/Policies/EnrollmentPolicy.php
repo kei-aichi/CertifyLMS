@@ -6,6 +6,7 @@ namespace App\Policies;
 
 use App\Enums\EnrollmentStatus;
 use App\Enums\UserRole;
+use App\Enums\UserStatus;
 use App\Models\Enrollment;
 use App\Models\User;
 
@@ -33,7 +34,8 @@ class EnrollmentPolicy
     {
         return match ($user->role) {
             UserRole::Admin => true,
-            UserRole::Student => $enrollment->user_id === $user->id,
+            UserRole::Student => $enrollment->user_id === $user->id
+                && $user->status === UserStatus::InProgress,
             UserRole::Coach => $this->isAssignedCoach($enrollment, $user),
         };
     }
