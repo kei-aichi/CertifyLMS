@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Http\Settings;
 
 use App\Enums\UserRole;
+use App\Models\Meeting;
 use App\Models\User;
 use App\UseCases\Settings\DestroyAvatarAction;
 use App\UseCases\Settings\StoreAvatarAction;
@@ -94,7 +95,7 @@ final class ProfileTest extends TestCase
 
     public function test_user_can_update_name_and_bio_without_changing_managed_fields(): void
     {
-        $user = User::factory()->coach()->create([
+        $user = User::factory()->student()->create([
             'name' => 'Before',
             'bio' => 'Old bio',
             'meeting_url' => 'https://example.test/meeting',
@@ -119,6 +120,94 @@ final class ProfileTest extends TestCase
         $this->assertSame('After', $user->name);
         $this->assertSame('New bio', $user->bio);
         $this->assertSame($original, $user->only(array_keys($original)));
+    }
+
+    public function test_coach_can_update_meeting_url_and_clear_it(): void
+    {
+        $coach = User::factory()->coach()->create(['meeting_url' => 'https://old.example/room']);
+
+        $this->actingAs($coach)->patch(route('settings.profile.update'), [
+            'name' => 'Coach',
+            'bio' => 'Bio',
+            'meeting_url' => 'https://new.example/room',
+        ])->assertRedirect(route('settings.profile.edit'));
+        $this->assertSame('https://new.example/room', $coach->refresh()->meeting_url);
+
+        $this->actingAs($coach)->patch(route('settings.profile.update'), [
+            'name' => 'Coach',
+            'bio' => 'Bio',
+            'meeting_url' => '',
+        ])->assertRedirect(route('settings.profile.edit'));
+        $this->assertNull($coach->refresh()->meeting_url);
+    }
+
+    public function test_student_and_admin_cannot_spoof_meeting_url(): void
+    {
+        foreach ([User::factory()->student(), User::factory()->admin()] as $factory) {
+            $user = $factory->create(['meeting_url' => 'https://original.example/room']);
+
+            $this->actingAs($user)->patch(route('settings.profile.update'), [
+                'name' => $user->name,
+                'bio' => $user->bio,
+                'meeting_url' => 'https://attacker.example/room',
+            ])->assertRedirect(route('settings.profile.edit'));
+
+            $this->assertSame('https://original.example/room', $user->refresh()->meeting_url);
+        }
+    }
+
+    /** @dataProvider invalidMeetingUrls */
+    public function test_coach_meeting_url_validation_preserves_existing_value(string $url): void
+    {
+        $coach = User::factory()->coach()->create(['meeting_url' => 'https://original.example/room']);
+
+        $this->actingAs($coach)->from(route('settings.profile.edit'))->patch(route('settings.profile.update'), [
+            'name' => $coach->name,
+            'bio' => $coach->bio,
+            'meeting_url' => $url,
+        ])->assertRedirect(route('settings.profile.edit'))->assertSessionHasErrors('meeting_url');
+
+        $this->assertSame('https://original.example/room', $coach->refresh()->meeting_url);
+    }
+
+    public function test_coach_can_save_a_500_character_meeting_url(): void
+    {
+        $coach = User::factory()->coach()->create();
+        $url = 'https://example.com/'.str_repeat('a', 480);
+        $this->assertSame(500, strlen($url));
+
+        $this->actingAs($coach)->patch(route('settings.profile.update'), [
+            'name' => $coach->name,
+            'bio' => $coach->bio,
+            'meeting_url' => $url,
+        ])->assertRedirect(route('settings.profile.edit'));
+
+        $this->assertSame($url, $coach->refresh()->meeting_url);
+    }
+
+    public function test_coach_url_update_does_not_change_existing_meeting_snapshot(): void
+    {
+        $coach = User::factory()->coach()->create(['meeting_url' => 'https://old.example/room']);
+        $meeting = Meeting::factory()->forCoach($coach)->create([
+            'meeting_url_snapshot' => 'https://old.example/room',
+        ]);
+
+        $this->actingAs($coach)->patch(route('settings.profile.update'), [
+            'name' => $coach->name,
+            'bio' => $coach->bio,
+            'meeting_url' => 'https://new.example/room',
+        ])->assertRedirect(route('settings.profile.edit'));
+
+        $this->assertSame('https://old.example/room', $meeting->refresh()->meeting_url_snapshot);
+    }
+
+    /** @return array<string, array{0: string}> */
+    public static function invalidMeetingUrls(): array
+    {
+        return [
+            'invalid url' => ['not-a-url'],
+            'over 500 chars' => ['https://example.com/'.str_repeat('a', 490)],
+        ];
     }
 
     public function test_all_roles_and_graduated_student_can_update_profile(): void
