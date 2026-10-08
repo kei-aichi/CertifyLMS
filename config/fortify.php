@@ -148,9 +148,9 @@ return [
     'features' => [
         // Registration / 2FA は招待制 LMS のためスコープ外
         Features::resetPasswords(),
-        Features::updateProfileInformation(),
+        // プロフィール更新は /settings/profile に一本化し、本人のメール変更を禁止する。
         // Password 更新は本人プロフィール画面 /settings/password で受け、UpdateUserPassword Action を委譲する
-        // 自前 Controller(App\Http\Controllers\Settings\PasswordController)経由で扱うため、Fortify 既定の
+        // 自前 Controller(App\Http\Controllers\Settings\ProfileController::updatePassword)経由で扱うため、Fortify 既定の
         // PUT /user/password ルートは登録しない(同 path と /settings/password の二重登録防止)
     ],
 

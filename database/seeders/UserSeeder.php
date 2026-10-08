@@ -66,6 +66,7 @@ class UserSeeder extends Seeder
                 'password' => $defaultPassword,
                 'status' => UserStatus::InProgress->value,
                 'bio' => '5 年以上のコーチング経験。基本情報・応用情報を中心に指導。',
+                'avatar_url' => '/images/logo/logo-mark.svg',
                 'profile_setup_completed' => true,
                 'email_verified_at' => $now,
                 'meeting_url' => 'https://meet.google.com/coach-taro-room',

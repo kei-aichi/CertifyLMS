@@ -112,6 +112,7 @@ class MeetingControllerTest extends TestCase
             'coach_id' => $coach->id,
             'enrollment_id' => $enrollment->id,
             'status' => MeetingStatus::Reserved->value,
+            'meeting_url_snapshot' => 'https://meet.example.com/coach-room',
         ]);
     }
 
@@ -292,6 +293,29 @@ class MeetingControllerTest extends TestCase
             Meeting::query()->where('status', MeetingStatus::Reserved->value)->count(),
             '同コーチ・同時刻の二重予約は (coach_id, scheduled_at) UNIQUE で阻止されるはず',
         );
+    }
+
+    public function test_store_allows_reservation_with_null_coach_meeting_url_and_snapshots_null(): void
+    {
+        $student = User::factory()->student()->inProgress()->create(['max_meetings' => 3]);
+        $admin = User::factory()->admin()->create();
+        $coach = User::factory()->coach()->inProgress()->create(['meeting_url' => null]);
+        $certification = Certification::factory()->published()->create();
+        $this->attachCoach($certification, $coach, $admin);
+        CoachAvailability::factory()->forCoach($coach)->onDay(1)->timeRange('09:00:00', '18:00:00')->create();
+        $enrollment = Enrollment::factory()->for($student, 'user')->for($certification)->learning()->create();
+        $scheduledAt = now()->startOfDay()->next(Carbon::MONDAY)->setTime(10, 0);
+
+        $this->actingAs($student)->post(route('meetings.store', $enrollment), [
+            'scheduled_at' => $scheduledAt->format('Y-m-d\\TH:i:s'),
+            'topic' => 'URLなし予約',
+        ])->assertRedirect();
+
+        $this->assertDatabaseHas('meetings', [
+            'student_id' => $student->id,
+            'coach_id' => $coach->id,
+            'meeting_url_snapshot' => null,
+        ]);
     }
 
     public function test_cancel_refunds_meeting_quota(): void

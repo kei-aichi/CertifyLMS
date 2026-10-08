@@ -28,6 +28,14 @@ class UserTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_with_avatar_factory_state_sets_existing_avatar_url(): void
+    {
+        $user = User::factory()->withAvatar()->make();
+
+        $this->assertSame('/images/logo/logo-mark.svg', $user->avatar_url);
+        $this->assertFileExists(public_path('images/logo/logo-mark.svg'));
+    }
+
     public function test_enrollments_relation_returns_only_owner_enrollments(): void
     {
         // Arrange

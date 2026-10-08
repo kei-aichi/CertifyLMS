@@ -98,4 +98,9 @@ class UserFactory extends Factory
             'default_enrollment_id' => $enrollment->id,
         ]);
     }
+
+    public function withAvatar(?string $avatarUrl = '/images/logo/logo-mark.svg'): static
+    {
+        return $this->state(fn () => ['avatar_url' => $avatarUrl]);
+    }
 }
