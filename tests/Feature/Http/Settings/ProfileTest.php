@@ -168,6 +168,11 @@ final class ProfileTest extends TestCase
             'meeting_url' => $url,
         ])->assertRedirect(route('settings.profile.edit'))->assertSessionHasErrors('meeting_url');
 
+        $this->assertStringContainsString(
+            '固定面談URL',
+            session('errors')->getBag('default')->first('meeting_url'),
+        );
+
         $this->assertSame('https://original.example/room', $coach->refresh()->meeting_url);
     }
 
@@ -284,6 +289,38 @@ final class ProfileTest extends TestCase
         $this->assertSame('Original bio', $user->bio);
     }
 
+    /** @dataProvider japaneseProfileValidationInputs */
+    public function test_profile_validation_uses_japanese_attribute_names(
+        string $field,
+        mixed $value,
+        string $expectedMessage,
+    ): void {
+        $user = User::factory()->create(['name' => 'Original', 'bio' => 'Original bio']);
+
+        $this->actingAs($user)
+            ->from(route('settings.profile.edit'))
+            ->patch(route('settings.profile.update'), [
+                'name' => $field === 'name' ? $value : $user->name,
+                'bio' => $field === 'bio' ? $value : $user->bio,
+            ])
+            ->assertRedirect(route('settings.profile.edit'));
+
+        $this->assertSame(
+            $expectedMessage,
+            session('errors')->getBag('default')->first($field),
+        );
+    }
+
+    /** @return array<string, array{0: string, 1: mixed, 2: string}> */
+    public static function japaneseProfileValidationInputs(): array
+    {
+        return [
+            'name required' => ['name', '', '氏名 を入力してください。'],
+            'name max' => ['name', str_repeat('a', 51), '氏名 は 50 文字以内で入力してください。'],
+            'bio max' => ['bio', str_repeat('a', 1001), '自己紹介 は 1000 文字以内で入力してください。'],
+        ];
+    }
+
     /** @return array<string, array{0: string, 1: mixed}> */
     public static function invalidProfileInputs(): array
     {
@@ -357,6 +394,37 @@ final class ProfileTest extends TestCase
         $errors = session('errors');
         $this->assertTrue($errors->getBag('updatePassword')->any());
         $this->assertSame($originalHash, $user->refresh()->password);
+    }
+
+    public function test_password_required_message_uses_japanese_attribute_names(): void
+    {
+        $user = User::factory()->create();
+
+        $this->actingAs($user)
+            ->from(route('settings.profile.edit', ['tab' => 'password']))
+            ->put(route('settings.password.update'), [])
+            ->assertRedirect(route('settings.profile.edit', ['tab' => 'password']));
+
+        $errors = session('errors')->getBag('updatePassword');
+        $this->assertStringContainsString('現在のパスワード', $errors->first('current_password'));
+        $this->assertStringContainsString('新しいパスワード', $errors->first('password'));
+    }
+
+    public function test_password_confirmation_message_uses_japanese_attribute_name(): void
+    {
+        $user = User::factory()->create();
+
+        $this->actingAs($user)
+            ->from(route('settings.profile.edit', ['tab' => 'password']))
+            ->put(route('settings.password.update'), [
+                'current_password' => 'password',
+                'password' => 'new-password-123',
+                'password_confirmation' => 'different-password-123',
+            ])
+            ->assertRedirect(route('settings.profile.edit', ['tab' => 'password']));
+
+        $errors = session('errors')->getBag('updatePassword');
+        $this->assertStringContainsString('新しいパスワード', $errors->first('password'));
     }
 
     /** @return array<string, array{0: array<string, string>}> */
@@ -441,9 +509,22 @@ final class ProfileTest extends TestCase
         Storage::fake('public');
         $user = User::factory()->create();
 
+        $this->actingAs($user)->from(route('settings.profile.edit'))->post(route('settings.avatar.store'), [])
+            ->assertRedirect(route('settings.profile.edit'))
+            ->assertSessionHasErrors('avatar');
+        $this->assertStringContainsString(
+            'アバター画像',
+            session('errors')->getBag('default')->first('avatar'),
+        );
+
         $this->actingAs($user)->from(route('settings.profile.edit'))->post(route('settings.avatar.store'), [
             'avatar' => UploadedFile::fake()->create('avatar.svg', 10, 'image/svg+xml'),
         ])->assertRedirect(route('settings.profile.edit'))->assertSessionHasErrors('avatar');
+
+        $this->assertStringContainsString(
+            'アバター画像',
+            session('errors')->getBag('default')->first('avatar'),
+        );
 
         $this->actingAs($user)->post(route('settings.avatar.store'), [
             'avatar' => UploadedFile::fake()->create('avatar.png', 2048, 'image/png'),
@@ -454,6 +535,10 @@ final class ProfileTest extends TestCase
         $this->actingAs($user)->from(route('settings.profile.edit'))->post(route('settings.avatar.store'), [
             'avatar' => UploadedFile::fake()->create('avatar.png', 2049, 'image/png'),
         ])->assertRedirect(route('settings.profile.edit'))->assertSessionHasErrors('avatar');
+        $this->assertStringContainsString(
+            'アバター画像',
+            session('errors')->getBag('default')->first('avatar'),
+        );
         $this->assertSame($savedUrl, $user->refresh()->avatar_url);
     }
 

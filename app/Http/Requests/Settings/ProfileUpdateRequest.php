@@ -28,4 +28,14 @@ final class ProfileUpdateRequest extends FormRequest
 
         return $rules;
     }
+
+    /** @return array<string, string> */
+    public function attributes(): array
+    {
+        return [
+            'name' => '氏名',
+            'bio' => '自己紹介',
+            'meeting_url' => '固定面談URL',
+        ];
+    }
 }

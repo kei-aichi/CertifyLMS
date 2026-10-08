@@ -32,6 +32,10 @@ class UpdateUserPassword implements UpdatesUserPasswords
             'password' => $this->passwordRules(),
         ], [
             'current_password.current_password' => __('The provided password does not match your current password.'),
+        ], [
+            'current_password' => '現在のパスワード',
+            'password' => '新しいパスワード',
+            'password_confirmation' => '新しいパスワード（確認）',
         ])->validateWithBag('updatePassword');
 
         $user->forceFill([
