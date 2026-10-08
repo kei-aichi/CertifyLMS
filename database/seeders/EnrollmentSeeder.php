@@ -12,6 +12,7 @@ use App\Enums\UserStatus;
 use App\Models\Certificate;
 use App\Models\Certification;
 use App\Models\Enrollment;
+use App\Models\EnrollmentGoal;
 use App\Models\EnrollmentStatusLog;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Collection;
@@ -25,7 +26,7 @@ use Illuminate\Support\Carbon;
  *
  * 1. **固定アカウント**(deterministic): 動作確認・スクショ撮影で安定して参照できる「決まったユーザー」の受講登録を生成する。
  *    - `student@certify-lms.test` を CertificationSeeder 投入の published 資格 4 件に learning で登録(ダッシュボードの合格可能性バンド safe / warning / danger / データ不足 を 1 画面で網羅するため)
- *    - 1 件目に達成済 / 未達成の個人目標を 2 件追加(目標 CRUD・達成マーク UI の即時確認用)
+ *    - 1 件目に達成済 / 未達成の個人目標を 4 件追加(目標 CRUD・達成マーク UI の即時確認用)
  *    - coach@(`coach1`) / coach2@ / admin@ が固定 student の Enrollment にメモを残す(他コーチ越境拒否シナリオ用)
  *
  * 2. **状態網羅 demo データ**(Factory + state + count): 一覧 / フィルタ / 状態遷移ボタン / 認可境界が各 status で動くことを実機確認する。
@@ -150,6 +151,57 @@ final class EnrollmentSeeder extends Seeder
                     'changed_by_user_id' => $student->id,
                     'changed_at' => now()->subDays(30 - $index * 10),
                     'changed_reason' => '新規登録',
+                ],
+            );
+
+            if ($index === 0) {
+                $this->seedFixedStudentGoals($enrollment);
+            }
+        }
+    }
+
+    /**
+     * 固定studentの最初のEnrollmentに、画面確認用の目標を冪等に投入する。
+     */
+    private function seedFixedStudentGoals(Enrollment $enrollment): void
+    {
+        $goals = [
+            [
+                'title' => '直近の過去問を解く',
+                'description' => 'まずは直近年度の過去問に取り組みます。',
+                'target_date' => now()->addDays(7)->toDateString(),
+                'achieved_at' => null,
+            ],
+            [
+                'title' => '総復習を完了する',
+                'description' => '試験範囲全体を復習します。',
+                'target_date' => now()->addMonths(2)->toDateString(),
+                'achieved_at' => null,
+            ],
+            [
+                'title' => '学習計画を整理する',
+                'description' => null,
+                'target_date' => null,
+                'achieved_at' => null,
+            ],
+            [
+                'title' => '教材の初回確認を完了する',
+                'description' => '登録済み教材の全体像を確認しました。',
+                'target_date' => null,
+                'achieved_at' => now()->subDays(2),
+            ],
+        ];
+
+        foreach ($goals as $goal) {
+            EnrollmentGoal::query()->firstOrCreate(
+                [
+                    'enrollment_id' => $enrollment->id,
+                    'title' => $goal['title'],
+                ],
+                [
+                    'description' => $goal['description'],
+                    'target_date' => $goal['target_date'],
+                    'achieved_at' => $goal['achieved_at'],
                 ],
             );
         }
