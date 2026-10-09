@@ -45,14 +45,13 @@ class EnrollmentNotePolicy
             return false;
         }
 
-        $fresh = Enrollment::withTrashed()
-            ->with(['user' => fn ($query) => $query->withTrashed()])
-            ->find($enrollment->id);
+        if (! $enrollment->relationLoaded('user')) {
+            $enrollment->load(['user' => fn ($query) => $query->withTrashed()]);
+        }
 
-        return $fresh !== null
-            && $fresh->deleted_at === null
-            && $fresh->user !== null
-            && $fresh->user->deleted_at === null;
+        return $enrollment->deleted_at === null
+            && $enrollment->user !== null
+            && $enrollment->user->deleted_at === null;
     }
 
     private function isAdminOrAssignedCoach(User $user, Enrollment $enrollment): bool
@@ -66,16 +65,25 @@ class EnrollmentNotePolicy
             return false;
         }
 
-        $certification = $enrollment->relationLoaded('certification')
-            ? $enrollment->certification
-            : $enrollment->load('certification')->certification;
+        if (! $enrollment->relationLoaded('certification')) {
+            $enrollment->load('certification');
+        }
+
+        $certification = $enrollment->certification;
+        if ($certification !== null && ! $certification->relationLoaded('coaches')) {
+            $certification->load('coaches');
+        }
 
         return $certification instanceof Certification
-            && $certification->coaches()->whereKey($user->id)->exists();
+            && $certification->coaches->contains('id', $user->id);
     }
 
     private function enrollmentForNote(EnrollmentNote $note): ?Enrollment
     {
+        if ($note->relationLoaded('enrollment')) {
+            return $note->enrollment;
+        }
+
         return Enrollment::withTrashed()->find($note->enrollment_id);
     }
 }

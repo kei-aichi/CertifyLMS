@@ -21,7 +21,7 @@ class EnrollmentNoteController extends Controller
         $action($enrollment, $request->user(), $request->validated());
 
         return redirect()->route('enrollments.show', $enrollment)
-            ->with('success', 'メモを作成しました。');
+            ->with('success', 'メモを追加しました。');
     }
 
     public function edit(EnrollmentNote $note): View
