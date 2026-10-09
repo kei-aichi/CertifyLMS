@@ -27,12 +27,12 @@ use Illuminate\Support\Carbon;
  * 1. **固定アカウント**(deterministic): 動作確認・スクショ撮影で安定して参照できる「決まったユーザー」の受講登録を生成する。
  *    - `student@certify-lms.test` を CertificationSeeder 投入の published 資格 4 件に learning で登録(ダッシュボードの合格可能性バンド safe / warning / danger / データ不足 を 1 画面で網羅するため)
  *    - 1 件目に達成済 / 未達成の個人目標を 4 件追加(目標 CRUD・達成マーク UI の即時確認用)
- *    - coach@(`coach1`) / coach2@ / admin@ が固定 student の Enrollment にメモを残す(他コーチ越境拒否シナリオ用)
+ *    - 固定 student の Enrollment への受講生メモは EnrollmentNoteSeeder が担当する。
  *
  * 2. **状態網羅 demo データ**(Factory + state + count): 一覧 / フィルタ / 状態遷移ボタン / 認可境界が各 status で動くことを実機確認する。
  *    - learning(基礎ターム)/ learning(実践ターム)/ passed / failed / learning(試験日未設定) の 5 パターンを demo student に循環配分
  *    - passed Enrollment には Certificate(`certificates`)を INSERT し、PDF 実体も生成(修了済み → PDF DL の実機確認用)
- *    - 担当 coach が割り当てられている資格 Enrollment にはコーチメモを 1-2 件散らす(coach 動線の即時確認用)
+ *    - 担当 coach が割り当てられている資格 Enrollment のメモは EnrollmentNoteSeeder が担当する。
  *
  * 依存順序: `UserSeeder` → `CertificationSeeder`(担当 coach 割当含む)→ 本 Seeder。
  */
@@ -119,7 +119,7 @@ final class EnrollmentSeeder extends Seeder
     }
 
     /**
-     * 固定 student に published 資格 4 件を learning で登録し、1 件目に個人目標 + 各件にコーチメモを添える。
+     * 固定 student に published 資格 4 件を learning で登録し、1 件目に個人目標を添える。
      *
      * 4 件にするのは、ダッシュボードの合格可能性バンド(safe / warning / danger / データ不足)を 1 画面で
      * 網羅させるため(各 Enrollment の模試スコアは MockExamSeeder が帯ごとに作り分ける)。
