@@ -109,6 +109,40 @@ final class SendMeetingRemindersCommandTest extends TestCase
         $this->assertSame(2, MeetingReminderDispatch::where('meeting_id', $meeting->id)->count());
     }
 
+    public function test_summary_is_reset_between_repeated_command_invocations(): void
+    {
+        $eveNow = CarbonImmutable::parse('2026-10-10 18:00:30', 'Asia/Tokyo');
+        $oneHourNow = CarbonImmutable::parse('2026-10-11 10:00:30', 'Asia/Tokyo');
+        [$eveMeeting, $eveStudent, $eveCoach] = $this->createMeeting('2026-10-11 10:00:00');
+        [$oneHourMeeting, $oneHourStudent, $oneHourCoach] = $this->createMeeting('2026-10-11 11:00:00');
+
+        foreach ([
+            ['meeting_id' => $eveMeeting->id, 'window' => 'eve', 'recipient_id' => $eveStudent->id],
+            ['meeting_id' => $eveMeeting->id, 'window' => 'eve', 'recipient_id' => $eveCoach->id],
+            ['meeting_id' => $oneHourMeeting->id, 'window' => 'eve', 'recipient_id' => $oneHourStudent->id],
+            ['meeting_id' => $oneHourMeeting->id, 'window' => 'eve', 'recipient_id' => $oneHourCoach->id],
+            ['meeting_id' => $oneHourMeeting->id, 'window' => 'one_hour_before', 'recipient_id' => $oneHourStudent->id],
+            ['meeting_id' => $oneHourMeeting->id, 'window' => 'one_hour_before', 'recipient_id' => $oneHourCoach->id],
+        ] as $dispatch) {
+            MeetingReminderDispatch::create($dispatch);
+        }
+        Notification::fake();
+
+        CarbonImmutable::setTestNow($eveNow);
+        $this->artisan('notifications:send-meeting-reminders', ['--window' => 'eve'])
+            ->expectsOutput('Meeting reminders processed: acquired=0, not_eligible=0, duplicate=4, skipped=0, failed=0.')
+            ->assertExitCode(0);
+
+        CarbonImmutable::setTestNow($oneHourNow);
+        $this->artisan('notifications:send-meeting-reminders', ['--window' => 'one_hour_before'])
+            ->expectsOutput('Meeting reminders processed: acquired=0, not_eligible=0, duplicate=2, skipped=0, failed=0.')
+            ->assertExitCode(0);
+
+        $this->assertSame(6, MeetingReminderDispatch::count());
+        $this->assertDatabaseCount('notifications', 0);
+        Notification::assertNothingSent();
+    }
+
     public function test_invalid_window_returns_failure_without_sending(): void
     {
         Notification::fake();

@@ -17,12 +17,8 @@ final class SendMeetingRemindersCommand extends Command
 {
     private const TIMEZONE = 'Asia/Tokyo';
 
-    protected $signature = 'notifications:send-meeting-reminders {--window=}';
-
-    protected $description = '予約済み面談のリマインダー通知を送信する。';
-
     /** @var array<string, int> */
-    private array $summary = [
+    private const INITIAL_SUMMARY = [
         'acquired' => 0,
         'not_eligible' => 0,
         'duplicate' => 0,
@@ -30,8 +26,17 @@ final class SendMeetingRemindersCommand extends Command
         'failed' => 0,
     ];
 
+    protected $signature = 'notifications:send-meeting-reminders {--window=}';
+
+    protected $description = '予約済み面談のリマインダー通知を送信する。';
+
+    /** @var array<string, int> */
+    private array $summary = self::INITIAL_SUMMARY;
+
     public function handle(SendReminderAction $sendReminder): int
     {
+        $this->summary = self::INITIAL_SUMMARY;
+
         $window = $this->option('window');
         if (! is_string($window) || ! in_array($window, ['eve', 'one_hour_before'], true)) {
             $this->error('The --window option must be eve or one_hour_before.');
