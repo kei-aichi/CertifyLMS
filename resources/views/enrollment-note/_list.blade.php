@@ -6,7 +6,14 @@
 @php
     use App\Models\EnrollmentNote;
 
-    $notes = $enrollment->notes()->with('author')->orderByDesc('created_at')->get();
+    $notes = $enrollment->notes()
+        ->with([
+            'author',
+            'enrollment.user',
+            'enrollment.certification.coaches',
+        ])
+        ->orderByDesc('created_at')
+        ->get();
 @endphp
 
 <x-card padding="md" shadow="sm">
