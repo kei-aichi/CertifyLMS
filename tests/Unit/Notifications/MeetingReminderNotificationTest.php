@@ -7,12 +7,15 @@ namespace Tests\Unit\Notifications;
 use App\Models\Meeting;
 use App\Notifications\MeetingReminderNotification;
 use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Notifications\Messages\MailMessage;
 use InvalidArgumentException;
 use Tests\TestCase;
 
 final class MeetingReminderNotificationTest extends TestCase
 {
+    use RefreshDatabase;
+
     public function test_eve_notification_has_compatible_database_data_and_mail(): void
     {
         $meeting = Meeting::factory()->reserved()->create([
