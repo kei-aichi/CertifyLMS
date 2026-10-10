@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Database;
 
+use App\Notifications\AnnouncementNotification;
 use App\Notifications\ChatMessageReceivedNotification;
 use App\Notifications\MeetingCanceledNotification;
 use App\Notifications\MeetingReservedNotification;
@@ -24,19 +25,22 @@ final class NotificationSeederTest extends TestCase
         Mail::fake();
         $this->seed(DatabaseSeeder::class);
 
-        $this->assertDatabaseCount('notifications', 24);
+        $announcementCount = DatabaseNotification::where('type', AnnouncementNotification::class)->count();
+        $this->assertDatabaseCount('notifications', 24 + $announcementCount);
         $this->assertSame(6, DatabaseNotification::where('type', ChatMessageReceivedNotification::class)->count());
         $this->assertSame(6, DatabaseNotification::where('type', QaReplyReceivedNotification::class)->count());
         $this->assertSame(6, DatabaseNotification::where('type', MeetingReservedNotification::class)->count());
         $this->assertSame(6, DatabaseNotification::where('type', MeetingCanceledNotification::class)->count());
-        $this->assertSame(12, DatabaseNotification::whereNull('read_at')->count());
-        $this->assertSame(12, DatabaseNotification::whereNotNull('read_at')->count());
+        $legacyNotifications = DatabaseNotification::query()
+            ->where('type', '!=', AnnouncementNotification::class);
+        $this->assertSame(12, (clone $legacyNotifications)->whereNull('read_at')->count());
+        $this->assertSame(12, (clone $legacyNotifications)->whereNotNull('read_at')->count());
         $this->assertGreaterThan(1, DatabaseNotification::query()->select('created_at')->distinct()->count());
         Mail::assertNothingSent();
 
         $this->seed(NotificationSeeder::class);
 
-        $this->assertDatabaseCount('notifications', 24);
+        $this->assertDatabaseCount('notifications', 24 + $announcementCount);
         Mail::assertNothingSent();
     }
 }

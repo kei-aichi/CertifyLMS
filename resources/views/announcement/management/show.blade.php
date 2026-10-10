@@ -37,6 +37,21 @@
                     <p class="mt-1 text-2xl font-display font-bold text-ink-900 tnum">{{ $announcement->dispatched_count }} 件</p>
                 </div>
                 <div>
+                    <p class="text-xs uppercase tracking-wider text-ink-500">配信状態</p>
+                    @php
+                        $statusVariant = match ($announcement->dispatch_status->value) {
+                            'succeeded' => 'success',
+                            'failed' => 'danger',
+                            default => 'warning',
+                        };
+                    @endphp
+                    <div class="mt-1">
+                        <x-badge :variant="$statusVariant" size="sm">
+                            {{ $announcement->dispatch_status->label() }}
+                        </x-badge>
+                    </div>
+                </div>
+                <div>
                     <p class="text-xs uppercase tracking-wider text-ink-500">配信日時</p>
                     <p class="mt-1 text-sm text-ink-900">{{ $announcement->dispatched_at?->format('Y/m/d H:i') ?? '—' }}</p>
                 </div>
@@ -45,6 +60,16 @@
                     <p class="mt-1 text-sm text-ink-900">{{ $announcement->createdBy?->name ?? '—' }}</p>
                 </div>
             </div>
+
+            @if ($announcement->dispatch_status->value === 'failed')
+                <x-alert type="error" class="mt-4">
+                    配信処理でエラーが発生しました。一部の受講生に配信済みの可能性があります。配信履歴を確認し、個別に対応してください。
+                </x-alert>
+            @elseif ($announcement->dispatch_status->value === 'processing')
+                <x-alert type="warning" class="mt-4">
+                    処理中または完了未確認です。配信状況を確認してください。
+                </x-alert>
+            @endif
 
             <hr class="my-4 border-subtle">
 

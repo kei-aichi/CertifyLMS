@@ -28,6 +28,13 @@ final class NotificationController extends Controller
         ]);
     }
 
+    public function show(DatabaseNotification $notification): View
+    {
+        $this->authorize('view', $notification);
+
+        return view('notifications.show', compact('notification'));
+    }
+
     public function markAsRead(DatabaseNotification $notification, MarkAsReadAction $action): RedirectResponse
     {
         $this->authorize('markAsRead', $notification);

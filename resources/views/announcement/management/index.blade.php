@@ -37,6 +37,7 @@
                         <x-table.row>
                             <x-table.heading>タイトル</x-table.heading>
                             <x-table.heading>対象</x-table.heading>
+                            <x-table.heading>配信状態</x-table.heading>
                             <x-table.heading class="text-right">配信件数</x-table.heading>
                             <x-table.heading>配信日時</x-table.heading>
                             <x-table.heading>配信者</x-table.heading>
@@ -57,6 +58,18 @@
                                 @elseif ($announcement->targetUser)
                                     <span class="ml-1 text-xs text-ink-600">{{ $announcement->targetUser->name }}</span>
                                 @endif
+                            </x-table.cell>
+                            <x-table.cell>
+                                @php
+                                    $statusVariant = match ($announcement->dispatch_status->value) {
+                                        'succeeded' => 'success',
+                                        'failed' => 'danger',
+                                        default => 'warning',
+                                    };
+                                @endphp
+                                <x-badge :variant="$statusVariant" size="sm">
+                                    {{ $announcement->dispatch_status->label() }}
+                                </x-badge>
                             </x-table.cell>
                             <x-table.cell class="text-right tnum">{{ $announcement->dispatched_count }}</x-table.cell>
                             <x-table.cell>{{ $announcement->dispatched_at?->format('Y/m/d H:i') ?? '—' }}</x-table.cell>
