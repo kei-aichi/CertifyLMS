@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\AnnouncementController;
 use App\Http\Controllers\Auth\OnboardingController;
 use App\Http\Controllers\BrowseController;
 use App\Http\Controllers\CertificationCatalogController;
@@ -15,6 +16,7 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\EnrollmentController;
 use App\Http\Controllers\EnrollmentGoalController;
 use App\Http\Controllers\EnrollmentManagementController;
+use App\Http\Controllers\EnrollmentNoteController;
 use App\Http\Controllers\InvitationController;
 use App\Http\Controllers\LearningHourTargetController;
 use App\Http\Controllers\MeetingController;
@@ -77,6 +79,7 @@ Route::middleware('auth')->group(function () {
     Route::put('settings/password', [ProfileController::class, 'updatePassword'])->name('settings.password.update');
 
     Route::get('notifications', [NotificationController::class, 'index'])->name('notifications.index');
+    Route::get('notifications/{notification}', [NotificationController::class, 'show'])->name('notifications.show');
     Route::post('notifications/read-all', [NotificationController::class, 'markAllAsRead'])->name('notifications.markAllAsRead');
     Route::post('notifications/{notification}/read', [NotificationController::class, 'markAsRead'])->name('notifications.markAsRead');
 
@@ -103,6 +106,15 @@ Route::middleware('auth')->group(function () {
         ->name('enrollment-goals.markAchieved');
     Route::delete('enrollment-goals/{goal}/achieve', [EnrollmentGoalController::class, 'unmarkAchieved'])
         ->name('enrollment-goals.unmarkAchieved');
+
+    Route::post('enrollments/{enrollment}/notes', [EnrollmentNoteController::class, 'store'])
+        ->name('enrollments.notes.store');
+    Route::get('enrollment-notes/{note}/edit', [EnrollmentNoteController::class, 'edit'])
+        ->name('enrollment-notes.edit');
+    Route::patch('enrollment-notes/{note}', [EnrollmentNoteController::class, 'update'])
+        ->name('enrollment-notes.update');
+    Route::delete('enrollment-notes/{note}', [EnrollmentNoteController::class, 'destroy'])
+        ->name('enrollment-notes.destroy');
 });
 
 // ============================================================
@@ -179,6 +191,12 @@ Route::middleware(['auth', 'role:student', 'active-learning'])
 // admin 専用ルート
 // ============================================================
 Route::middleware(['auth', 'role:admin'])->prefix('admin')->group(function () {
+    // 管理者お知らせ
+    Route::get('announcements', [AnnouncementController::class, 'index'])->name('admin.announcements.index');
+    Route::get('announcements/create', [AnnouncementController::class, 'create'])->name('admin.announcements.create');
+    Route::post('announcements', [AnnouncementController::class, 'store'])->name('admin.announcements.store');
+    Route::get('announcements/{announcement}', [AnnouncementController::class, 'show'])->name('admin.announcements.show');
+
     // プラン管理。create を動的パラメータより先に定義する。
     Route::get('plans', [PlanController::class, 'index'])->name('admin.plans.index');
     Route::get('plans/create', [PlanController::class, 'create'])->name('admin.plans.create');

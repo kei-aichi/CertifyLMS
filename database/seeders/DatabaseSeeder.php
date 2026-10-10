@@ -24,6 +24,7 @@ class DatabaseSeeder extends Seeder
             QaBoardSeeder::class,
             InvitationSeeder::class,
             EnrollmentSeeder::class,
+            EnrollmentNoteSeeder::class,
             MentoringSeeder::class,
             ContentSeeder::class,
             LearningSeeder::class,
@@ -32,6 +33,7 @@ class DatabaseSeeder extends Seeder
             ChatSeeder::class,
             CertificateSeeder::class,
             NotificationSeeder::class,
+            AnnouncementSeeder::class,
         ]);
     }
 }
