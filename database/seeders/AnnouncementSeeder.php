@@ -26,6 +26,10 @@ use Illuminate\Support\Facades\DB;
  */
 final class AnnouncementSeeder extends Seeder
 {
+    private const EMPTY_TARGET_CERTIFICATION_NAME = '【お知らせSeeder専用】対象者0人確認用資格';
+
+    private const EMPTY_TARGET_USER_EMAIL = 'announcement-seeder-empty-target@example.com';
+
     public function run(): void
     {
         $admin = User::query()->where('role', UserRole::Admin->value)->first()
@@ -34,7 +38,7 @@ final class AnnouncementSeeder extends Seeder
         $certification = $this->certificationWithLearningEnrollment($allStudent);
         $userStudent = $this->activeStudent();
         $emptyCertification = $this->certificationWithoutLearningEnrollment();
-        $this->ensureDeletedEnrollment($allStudent, $emptyCertification);
+        $this->ensureDeletedEnrollment($emptyCertification);
 
         $this->seedAnnouncement(
             $admin,
@@ -170,27 +174,33 @@ final class AnnouncementSeeder extends Seeder
 
     private function certificationWithoutLearningEnrollment(): Certification
     {
-        return Certification::query()
-            ->whereDoesntHave('enrollments', fn ($query) => $query->where('status', EnrollmentStatus::Learning->value))
-            ->first()
-            ?? Certification::factory()->published()->create();
+        return Certification::query()->where('name', self::EMPTY_TARGET_CERTIFICATION_NAME)->first()
+            ?? Certification::factory()->published()->create([
+                'name' => self::EMPTY_TARGET_CERTIFICATION_NAME,
+            ]);
     }
 
-    private function ensureDeletedEnrollment(User $student, Certification $certification): void
+    private function ensureDeletedEnrollment(Certification $certification): void
     {
+        $emptyTargetStudent = User::query()->firstOrCreate(
+            ['email' => self::EMPTY_TARGET_USER_EMAIL],
+            User::factory()->student()->graduated()->raw(),
+        );
+
         $enrollment = Enrollment::withTrashed()
-            ->where('user_id', $student->id)
+            ->where('user_id', $emptyTargetStudent->id)
             ->where('certification_id', $certification->id)
             ->first();
 
         if ($enrollment === null) {
             $enrollment = Enrollment::factory()
-                ->for($student)
+                ->for($emptyTargetStudent)
                 ->for($certification)
                 ->learning()
                 ->create();
         }
 
+        // このSeeder専用に作成したEnrollmentだけを対象者0人の確認用として論理削除する。
         if (! $enrollment->trashed()) {
             $enrollment->delete();
         }

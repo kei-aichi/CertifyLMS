@@ -52,10 +52,24 @@ final class AnnouncementSeederTest extends TestCase
 
         $announcementCount = Announcement::count();
         $notificationCount = DatabaseNotification::where('type', AnnouncementNotification::class)->count();
+        $enrollmentState = Enrollment::query()
+            ->get(['id', 'status', 'deleted_at'])
+            ->mapWithKeys(fn (Enrollment $enrollment): array => [
+                $enrollment->id => [$enrollment->status->value, $enrollment->deleted_at?->toISOString()],
+            ]);
         $this->seed(AnnouncementSeeder::class);
 
         $this->assertSame($announcementCount, Announcement::count());
         $this->assertSame($notificationCount, DatabaseNotification::where('type', AnnouncementNotification::class)->count());
+        $this->assertSame(
+            $enrollmentState->all(),
+            Enrollment::query()
+                ->get(['id', 'status', 'deleted_at'])
+                ->mapWithKeys(fn (Enrollment $enrollment): array => [
+                    $enrollment->id => [$enrollment->status->value, $enrollment->deleted_at?->toISOString()],
+                ])
+                ->all(),
+        );
         Mail::assertNothingSent();
     }
 }
