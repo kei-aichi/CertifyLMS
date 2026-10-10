@@ -7,11 +7,14 @@ namespace Tests\Unit\Notifications;
 use App\Models\Announcement;
 use App\Models\User;
 use App\Notifications\AnnouncementNotification;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Notifications\Messages\MailMessage;
 use Tests\TestCase;
 
 final class AnnouncementNotificationTest extends TestCase
 {
+    use RefreshDatabase;
+
     public function test_database_payload_and_mail_contain_only_announcement_content(): void
     {
         $announcement = Announcement::factory()->create([
