@@ -78,6 +78,7 @@ Route::middleware('auth')->group(function () {
     Route::put('settings/password', [ProfileController::class, 'updatePassword'])->name('settings.password.update');
 
     Route::get('notifications', [NotificationController::class, 'index'])->name('notifications.index');
+    Route::get('notifications/{notification}', [NotificationController::class, 'show'])->name('notifications.show');
     Route::post('notifications/read-all', [NotificationController::class, 'markAllAsRead'])->name('notifications.markAllAsRead');
     Route::post('notifications/{notification}/read', [NotificationController::class, 'markAsRead'])->name('notifications.markAsRead');
 
@@ -180,10 +181,10 @@ Route::middleware(['auth', 'role:student', 'active-learning'])
 // admin 専用ルート
 // ============================================================
 Route::middleware(['auth', 'role:admin'])->prefix('admin')->group(function () {
-    // 管理者お知らせ（Step 1-3では閲覧画面のみ。配信POSTはStep 2で追加する。）
+    // 管理者お知らせ
     Route::get('announcements', [AnnouncementController::class, 'index'])->name('admin.announcements.index');
     Route::get('announcements/create', [AnnouncementController::class, 'create'])->name('admin.announcements.create');
-    Route::post('announcements', [AnnouncementController::class, 'storeNotImplemented'])->name('admin.announcements.store');
+    Route::post('announcements', [AnnouncementController::class, 'store'])->name('admin.announcements.store');
     Route::get('announcements/{announcement}', [AnnouncementController::class, 'show'])->name('admin.announcements.show');
 
     // プラン管理。create を動的パラメータより先に定義する。

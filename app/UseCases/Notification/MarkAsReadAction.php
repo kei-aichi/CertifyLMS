@@ -26,10 +26,14 @@ final class MarkAsReadAction
         $data = is_array($notification->data) ? $notification->data : [];
         $routeName = $data['redirect_route'] ?? null;
         $parameters = $data['redirect_parameters'] ?? [];
+        if ($routeName === 'notifications.show') {
+            $parameters = ['notification' => $notification->getKey()];
+        }
         $allowedRoutes = [
             'chat.show',
             'qa-board.show',
             'meetings.show',
+            'notifications.show',
         ];
 
         if (! is_string($routeName) || ! in_array($routeName, $allowedRoutes, true) || ! is_array($parameters) || ! Route::has($routeName)) {

@@ -67,6 +67,59 @@ final class IndexTest extends TestCase
             ->assertRedirect(route('notifications.index'));
     }
 
+    public function test_user_can_view_announcement_notification_detail_without_marking_it_read(): void
+    {
+        $user = User::factory()->student()->create();
+        $notification = $this->notification($user, '運営のお知らせ');
+        $notification->data = [
+            'notification_type' => 'admin_announcement',
+            'title' => '運営のお知らせ',
+            'body' => '本文詳細',
+        ];
+        $notification->save();
+
+        $this->actingAs($user)
+            ->get(route('notifications.show', $notification))
+            ->assertOk()
+            ->assertViewIs('notifications.show')
+            ->assertSeeText('本文詳細');
+
+        $this->assertNull($notification->fresh()->read_at);
+    }
+
+    public function test_reading_announcement_notification_redirects_to_detail_and_marks_it_read(): void
+    {
+        $user = User::factory()->student()->create();
+        $notification = $this->notification($user, '運営のお知らせ');
+        $notification->data = [
+            'notification_type' => 'admin_announcement',
+            'title' => '運営のお知らせ',
+            'body' => '本文詳細',
+            'redirect_route' => 'notifications.show',
+            'redirect_parameters' => [],
+        ];
+        $notification->save();
+
+        $this->actingAs($user)
+            ->post(route('notifications.markAsRead', $notification))
+            ->assertRedirect(route('notifications.show', $notification));
+
+        $this->assertNotNull($notification->fresh()->read_at);
+    }
+
+    public function test_user_cannot_view_another_users_notification_detail(): void
+    {
+        $user = User::factory()->student()->create();
+        $other = User::factory()->student()->create();
+        $notification = $this->notification($other, '他人のお知らせ');
+
+        $this->actingAs($user)
+            ->get(route('notifications.show', $notification))
+            ->assertForbidden();
+
+        $this->assertNull($notification->fresh()->read_at);
+    }
+
     public function test_user_cannot_mark_another_users_notification_as_read(): void
     {
         $user = User::factory()->create();
