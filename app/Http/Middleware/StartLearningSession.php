@@ -28,6 +28,10 @@ final class StartLearningSession
     {
         $response = $next($request);
 
+        if ($response->getStatusCode() !== Response::HTTP_OK) {
+            return $response;
+        }
+
         $section = $request->route('section');
         $user = $request->user();
 

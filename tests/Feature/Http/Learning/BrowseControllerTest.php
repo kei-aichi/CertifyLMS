@@ -87,6 +87,16 @@ class BrowseControllerTest extends TestCase
         $response->assertOk();
     }
 
+    public function test_show_part_allows_learning_enrollment(): void
+    {
+        [$student, $certification] = $this->buildStudentAndCertification();
+        $part = Part::factory()->for($certification)->create(['status' => ContentStatus::Published->value]);
+
+        $this->actingAs($student)
+            ->get(route('learning.parts.show', $part))
+            ->assertOk();
+    }
+
     public function test_show_part_forbidden_for_non_enrolled_student(): void
     {
         $student = User::factory()->student()->inProgress()->create();
@@ -106,6 +116,28 @@ class BrowseControllerTest extends TestCase
         $response = $this->actingAs($student)->get(route('learning.chapters.show', $chapter));
 
         $response->assertNotFound();
+    }
+
+    public function test_show_chapter_allows_learning_enrollment(): void
+    {
+        [$student, $certification] = $this->buildStudentAndCertification();
+        $part = Part::factory()->for($certification)->create(['status' => ContentStatus::Published->value]);
+        $chapter = Chapter::factory()->for($part)->create(['status' => ContentStatus::Published->value]);
+
+        $this->actingAs($student)
+            ->get(route('learning.chapters.show', $chapter))
+            ->assertOk();
+    }
+
+    public function test_show_chapter_allows_passed_enrollment(): void
+    {
+        [$student, $certification] = $this->buildStudentAndCertification(EnrollmentStatus::Passed);
+        $part = Part::factory()->for($certification)->create(['status' => ContentStatus::Published->value]);
+        $chapter = Chapter::factory()->for($part)->create(['status' => ContentStatus::Published->value]);
+
+        $this->actingAs($student)
+            ->get(route('learning.chapters.show', $chapter))
+            ->assertOk();
     }
 
     public function test_show_section_auto_starts_learning_session(): void
@@ -192,6 +224,95 @@ class BrowseControllerTest extends TestCase
             ->assertNotFound();
     }
 
+    public function test_show_part_404_when_certification_archived_for_passed_enrollment(): void
+    {
+        [$student, $part] = $this->buildArchivedCertificationPart(EnrollmentStatus::Passed);
+
+        $this->actingAs($student)
+            ->get(route('learning.parts.show', $part))
+            ->assertNotFound();
+    }
+
+    public function test_show_chapter_404_when_certification_archived_for_passed_enrollment(): void
+    {
+        [$student, $part] = $this->buildArchivedCertificationPart(EnrollmentStatus::Passed);
+        $chapter = Chapter::factory()->for($part)->create(['status' => ContentStatus::Published->value]);
+
+        $this->actingAs($student)
+            ->get(route('learning.chapters.show', $chapter))
+            ->assertNotFound();
+    }
+
+    public function test_show_section_404_when_certification_archived_for_passed_enrollment(): void
+    {
+        [$student, $part] = $this->buildArchivedCertificationPart(EnrollmentStatus::Passed);
+        $chapter = Chapter::factory()->for($part)->create(['status' => ContentStatus::Published->value]);
+        $section = Section::factory()->for($chapter)->create([
+            'status' => ContentStatus::Published->value,
+            'body' => '# テスト本文',
+        ]);
+
+        $this->actingAs($student)
+            ->get(route('learning.sections.show', $section))
+            ->assertNotFound();
+    }
+
+    public function test_archived_certification_section_404_does_not_create_or_update_learning_session(): void
+    {
+        [$student, $part] = $this->buildArchivedCertificationPart();
+        $chapter = Chapter::factory()->for($part)->create(['status' => ContentStatus::Published->value]);
+        $section = Section::factory()->for($chapter)->create([
+            'status' => ContentStatus::Published->value,
+            'body' => '# テスト本文',
+        ]);
+        $enrollment = $student->enrollments()->first();
+        $openSession = LearningSession::factory()
+            ->forUser($student)
+            ->forEnrollment($enrollment)
+            ->open()
+            ->create();
+        $openSession->refresh();
+        $before = $openSession->getAttributes();
+        $countBefore = LearningSession::query()->count();
+
+        $this->actingAs($student)
+            ->get(route('learning.sections.show', $section))
+            ->assertNotFound();
+
+        $openSession->refresh();
+
+        $this->assertSame($countBefore, LearningSession::query()->count());
+        $this->assertSame($before, $openSession->getAttributes());
+    }
+
+    public function test_archived_certification_section_404_does_not_create_or_update_learning_session_for_passed_enrollment(): void
+    {
+        [$student, $part] = $this->buildArchivedCertificationPart(EnrollmentStatus::Passed);
+        $chapter = Chapter::factory()->for($part)->create(['status' => ContentStatus::Published->value]);
+        $section = Section::factory()->for($chapter)->create([
+            'status' => ContentStatus::Published->value,
+            'body' => '# テスト本文',
+        ]);
+        $enrollment = $student->enrollments()->first();
+        $openSession = LearningSession::factory()
+            ->forUser($student)
+            ->forEnrollment($enrollment)
+            ->open()
+            ->create();
+        $openSession->refresh();
+        $before = $openSession->getAttributes();
+        $countBefore = LearningSession::query()->count();
+
+        $this->actingAs($student)
+            ->get(route('learning.sections.show', $section))
+            ->assertNotFound();
+
+        $openSession->refresh();
+
+        $this->assertSame($countBefore, LearningSession::query()->count());
+        $this->assertSame($before, $openSession->getAttributes());
+    }
+
     /**
      * @return array{0: User, 1: Certification}
      */
@@ -225,11 +346,16 @@ class BrowseControllerTest extends TestCase
      *
      * @return array{0: User, 1: Part}
      */
-    private function buildArchivedCertificationPart(): array
+    private function buildArchivedCertificationPart(EnrollmentStatus $status = EnrollmentStatus::Learning): array
     {
         $student = User::factory()->student()->inProgress()->create();
         $certification = Certification::factory()->archived()->create();
-        Enrollment::factory()->for($student)->for($certification)->learning()->create();
+        $enrollmentFactory = Enrollment::factory()
+            ->for($student)
+            ->for($certification);
+        $status === EnrollmentStatus::Passed
+            ? $enrollmentFactory->passed()->create()
+            : $enrollmentFactory->learning()->create();
         $part = Part::factory()->for($certification)->create(['status' => ContentStatus::Published->value]);
 
         return [$student, $part];
