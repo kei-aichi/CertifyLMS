@@ -43,16 +43,34 @@ final class OnboardAction
     public function __invoke(Invitation $invitation, array $validated): User
     {
         $user = DB::transaction(function () use ($invitation, $validated) {
-            $invitation->refresh();
-            $user = $invitation->user;
+            // 同一 User に複数の pending Invitation が存在する場合も登録処理を直列化する。
+            // Invitation と User を常に User → Invitation の順でロックし、相互ロックを避ける。
+            $user = User::query()
+                ->whereKey($invitation->user_id)
+                ->lockForUpdate()
+                ->first();
+
+            $lockedInvitation = Invitation::query()
+                ->whereKey($invitation->getKey())
+                ->lockForUpdate()
+                ->first();
+
+            $invitation = $lockedInvitation;
 
             if (
                 $user === null
+                || $invitation === null
                 || $invitation->status !== InvitationStatus::Pending
                 || $invitation->expires_at === null
                 || $invitation->expires_at->isPast()
                 || $user->status !== UserStatus::Invited
             ) {
+                throw new InvalidInvitationTokenException;
+            }
+
+            // User.status は B-B-12 の責務のため invited のままでも、
+            // profile_setup_completed が true ならオンボーディング済みとして再登録を拒否する。
+            if ($user->profile_setup_completed) {
                 throw new InvalidInvitationTokenException;
             }
 
@@ -100,6 +118,11 @@ final class OnboardAction
                     reason: 'オンボーディング初期付与',
                 );
             }
+
+            $invitation->forceFill([
+                'status' => InvitationStatus::Accepted,
+                'accepted_at' => $now,
+            ])->save();
 
             return $user->refresh();
         });

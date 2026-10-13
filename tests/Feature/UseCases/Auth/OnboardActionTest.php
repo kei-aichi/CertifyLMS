@@ -279,4 +279,41 @@ class OnboardActionTest extends TestCase
             'password' => 'secret-pass',
         ]);
     }
+
+    public function test_rejects_second_pending_invitation_after_first_onboarding(): void
+    {
+        [$firstInvitation, $user] = $this->setupInvitedUser();
+        $secondInvitation = Invitation::factory()
+            ->forUser($user)
+            ->pending()
+            ->create(['invited_by_user_id' => $firstInvitation->invited_by_user_id]);
+
+        app(OnboardAction::class)($firstInvitation, [
+            'name' => '初回登録',
+            'password' => 'first-password',
+        ]);
+
+        $user->refresh();
+        $nameAfterFirstOnboarding = $user->name;
+        $passwordAfterFirstOnboarding = $user->password;
+        $statusLogCount = $user->statusLogs()->count();
+        $quotaTransactionCount = $user->meetingQuotaTransactions()->count();
+
+        $this->expectException(InvalidInvitationTokenException::class);
+
+        try {
+            app(OnboardAction::class)($secondInvitation, [
+                'name' => '二回目登録',
+                'password' => 'second-password',
+            ]);
+        } finally {
+            $user->refresh();
+            $this->assertSame($nameAfterFirstOnboarding, $user->name);
+            $this->assertSame($passwordAfterFirstOnboarding, $user->password);
+            $this->assertSame($statusLogCount, $user->statusLogs()->count());
+            $this->assertSame($quotaTransactionCount, $user->meetingQuotaTransactions()->count());
+            $this->assertSame(InvitationStatus::Pending, $secondInvitation->fresh()->status);
+            $this->assertNull($secondInvitation->fresh()->accepted_at);
+        }
+    }
 }
