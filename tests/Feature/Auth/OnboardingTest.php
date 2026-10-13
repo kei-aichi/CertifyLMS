@@ -128,7 +128,73 @@ class OnboardingTest extends TestCase
 
         $response = $this->get($url);
 
+        $response->assertStatus(410);
         $response->assertViewIs('auth.invitation-invalid');
+    }
+
+    public function test_store_rejects_accepted_invitation_before_input_validation(): void
+    {
+        $invitation = $this->freshInvitation();
+
+        $this->post($this->postUrl($invitation), [
+            'name' => '初回登録',
+            'password' => 'secret-pass',
+        ])->assertRedirect(route('dashboard.index'));
+
+        $user = $invitation->user->fresh();
+        $name = $user->name;
+        $password = $user->password;
+
+        $response = $this->post($this->postUrl($invitation), [
+            'name' => '再登録',
+            'password' => 'short',
+        ]);
+
+        $response->assertStatus(410);
+        $this->assertSame($name, $user->fresh()->name);
+        $this->assertSame($password, $user->fresh()->password);
+        $this->assertDatabaseMissing('users', ['name' => '再登録']);
+    }
+
+    public function test_store_rejects_accepted_invitation_with_valid_input(): void
+    {
+        $invitation = $this->freshInvitation();
+
+        $this->post($this->postUrl($invitation), [
+            'name' => '初回登録',
+            'bio' => '初回プロフィール',
+            'password' => 'first-password',
+            'password_confirmation' => 'first-password',
+        ])->assertRedirect(route('dashboard.index'));
+
+        $invitation->refresh();
+        $this->assertSame(InvitationStatus::Accepted, $invitation->status);
+        $this->assertNotNull($invitation->accepted_at);
+
+        $user = $invitation->user->fresh();
+        $name = $user->name;
+        $password = $user->password;
+        $statusLogCount = $user->statusLogs()->count();
+        $quotaTransactionCount = $user->meetingQuotaTransactions()->count();
+        $acceptedAt = $invitation->accepted_at;
+
+        $response = $this->post($this->postUrl($invitation), [
+            'name' => '再登録',
+            'bio' => '再登録プロフィール',
+            'password' => 'second-password',
+            'password_confirmation' => 'second-password',
+        ]);
+
+        $response->assertStatus(410);
+
+        $this->assertSame($name, $user->fresh()->name);
+        $this->assertSame($password, $user->fresh()->password);
+        $this->assertSame($statusLogCount, $user->statusLogs()->count());
+        $this->assertSame($quotaTransactionCount, $user->meetingQuotaTransactions()->count());
+
+        $invitation->refresh();
+        $this->assertSame(InvitationStatus::Accepted, $invitation->status);
+        $this->assertEquals($acceptedAt, $invitation->accepted_at);
     }
 
     public function test_show_renders_invalid_view_when_user_status_not_invited(): void

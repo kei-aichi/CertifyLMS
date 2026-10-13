@@ -5,19 +5,27 @@ declare(strict_types=1);
 namespace App\Http\Requests\Auth;
 
 use App\Enums\UserRole;
+use App\Enums\InvitationStatus;
+use App\Exceptions\Auth\InvalidInvitationTokenException;
 use App\Models\Invitation;
 use Illuminate\Foundation\Http\FormRequest;
 
 /**
  * オンボーディングフォーム(初回パスワード設定 + プロフィール入力)のリクエスト。
  *
- * 認可は署名付き URL に委ねるため `authorize()` は常に true。
+ * 認可は署名付き URLに委ね、使用済み招待だけは入力検証前に410で拒否する。
  * コーチ宛て招待の場合は固定面談 URL(`meeting_url`)の入力を必須化し、受講生宛てでは表示しない。
  */
 class OnboardingRequest extends FormRequest
 {
     public function authorize(): bool
     {
+        $invitation = $this->route('invitation');
+
+        if ($invitation instanceof Invitation && $invitation->status === InvitationStatus::Accepted) {
+            throw new InvalidInvitationTokenException;
+        }
+
         return true;
     }
 
