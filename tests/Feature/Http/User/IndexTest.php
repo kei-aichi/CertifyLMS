@@ -116,6 +116,154 @@ class IndexTest extends TestCase
         $response->assertDontSee('active@example.test');
     }
 
+    public function test_default_list_excludes_withdrawn_users_and_soft_deleted_inconsistent_users(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $visible = User::factory()->student()->create([
+            'email' => 'visible@example.test',
+            'status' => UserStatus::InProgress->value,
+            'deleted_at' => null,
+        ]);
+        $withdrawn = User::factory()->student()->create([
+            'email' => 'withdrawn@example.test',
+            'status' => UserStatus::Withdrawn->value,
+            'deleted_at' => null,
+        ]);
+        $softDeletedWithdrawn = $this->createSoftDeletedUser([
+            'email' => 'soft-deleted-withdrawn@example.test',
+            'status' => UserStatus::Withdrawn->value,
+        ]);
+        $softDeletedActive = $this->createSoftDeletedUser([
+            'email' => 'soft-deleted-active@example.test',
+            'status' => UserStatus::InProgress->value,
+        ]);
+
+        $response = $this->actingAs($admin)->get(route('admin.users.index'));
+
+        $response->assertOk();
+        $response->assertSee($visible->email);
+        $response->assertDontSee($withdrawn->email);
+        $response->assertDontSee($softDeletedWithdrawn->email);
+        $response->assertDontSee($softDeletedActive->email);
+        $this->assertSame(2, $response->viewData('users')->total());
+    }
+
+    public function test_withdrawn_filter_includes_soft_deleted_and_not_soft_deleted_withdrawn_users(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $withdrawn = User::factory()->student()->create([
+            'email' => 'withdrawn@example.test',
+            'status' => UserStatus::Withdrawn->value,
+            'deleted_at' => null,
+        ]);
+        $softDeletedWithdrawn = $this->createSoftDeletedUser([
+            'email' => 'soft-deleted-withdrawn@example.test',
+            'status' => UserStatus::Withdrawn->value,
+        ]);
+        $active = User::factory()->student()->create([
+            'email' => 'active@example.test',
+            'status' => UserStatus::InProgress->value,
+            'deleted_at' => null,
+        ]);
+
+        $response = $this->actingAs($admin)->get(route('admin.users.index', ['status' => 'withdrawn']));
+
+        $response->assertOk();
+        $response->assertSee($withdrawn->email);
+        $response->assertSee($softDeletedWithdrawn->email);
+        $response->assertDontSee($active->email);
+        $this->assertSame(2, $response->viewData('users')->total());
+    }
+
+    public function test_status_filters_include_only_matching_not_soft_deleted_users(): void
+    {
+        $admin = User::factory()->admin()->create([
+            'status' => UserStatus::Withdrawn->value,
+            'deleted_at' => null,
+        ]);
+
+        foreach (UserStatus::cases() as $status) {
+            if ($status === UserStatus::Withdrawn) {
+                continue;
+            }
+
+            $visible = User::factory()->student()->create([
+                'email' => $status->value.'-visible@example.test',
+                'status' => $status->value,
+                'deleted_at' => null,
+            ]);
+            $softDeleted = $this->createSoftDeletedUser([
+                'email' => $status->value.'-soft-deleted@example.test',
+                'status' => $status->value,
+            ]);
+
+            $response = $this->actingAs($admin)->get(route('admin.users.index', ['status' => $status->value]));
+
+            $response->assertOk();
+            $response->assertSee($visible->email);
+            $response->assertDontSee($softDeleted->email);
+            $this->assertSame(1, $response->viewData('users')->total());
+        }
+    }
+
+    public function test_status_filter_is_applied_consistently_to_all_roles(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $users = collect([
+            User::factory()->admin()->create(['email' => 'admin-withdrawn@example.test', 'deleted_at' => null]),
+            User::factory()->coach()->create(['email' => 'coach-withdrawn@example.test', 'deleted_at' => null]),
+            User::factory()->student()->create(['email' => 'student-withdrawn@example.test', 'deleted_at' => null]),
+        ]);
+        $users->each(fn (User $user) => $user->forceFill(['status' => UserStatus::Withdrawn])->save());
+
+        $response = $this->actingAs($admin)->get(route('admin.users.index'));
+
+        $response->assertOk();
+        $users->each(fn (User $user) => $response->assertDontSee($user->email));
+        $this->assertSame(1, $response->viewData('users')->total());
+
+        $response = $this->actingAs($admin)->get(route('admin.users.index', ['status' => 'withdrawn']));
+
+        $response->assertOk();
+        $users->each(fn (User $user) => $response->assertSee($user->email));
+        $this->assertSame(3, $response->viewData('users')->total());
+    }
+
+    public function test_keyword_and_role_filters_combine_with_withdrawn_status_filter(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $matching = User::factory()->coach()->create([
+            'name' => '対象コーチ',
+            'email' => 'target-coach@example.test',
+            'status' => UserStatus::Withdrawn->value,
+            'deleted_at' => null,
+        ]);
+        $otherRole = User::factory()->student()->create([
+            'name' => '対象受講生',
+            'email' => 'target-student@example.test',
+            'status' => UserStatus::Withdrawn->value,
+            'deleted_at' => null,
+        ]);
+        $otherKeyword = User::factory()->coach()->create([
+            'name' => '別コーチ',
+            'email' => 'other-coach@example.test',
+            'status' => UserStatus::Withdrawn->value,
+            'deleted_at' => null,
+        ]);
+
+        $response = $this->actingAs($admin)->get(route('admin.users.index', [
+            'keyword' => '対象',
+            'role' => 'coach',
+            'status' => 'withdrawn',
+        ]));
+
+        $response->assertOk();
+        $response->assertSee($matching->email);
+        $response->assertDontSee($otherRole->email);
+        $response->assertDontSee($otherKeyword->email);
+        $this->assertSame(1, $response->viewData('users')->total());
+    }
+
     public function test_paginates_20_per_page(): void
     {
         $admin = User::factory()->admin()->create();
@@ -161,5 +309,16 @@ class IndexTest extends TestCase
         $this->assertLessThan($oldInvitedPos, $oldActivePos);
         // Within Active: newer created_at comes first
         $this->assertLessThan($oldActivePos, $newActivePos);
+    }
+
+    /**
+     * @param array<string, mixed> $attributes
+     */
+    private function createSoftDeletedUser(array $attributes): User
+    {
+        $user = User::factory()->create($attributes);
+        $user->forceFill(['deleted_at' => now()])->save();
+
+        return $user->fresh();
     }
 }

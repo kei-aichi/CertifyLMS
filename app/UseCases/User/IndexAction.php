@@ -25,7 +25,11 @@ final class IndexAction
     ): LengthAwarePaginator {
         $query = User::query();
 
-        $query->withTrashed();
+        if ($status === UserStatus::Withdrawn) {
+            $query->withTrashed();
+        } else {
+            $query->where('status', '!=', UserStatus::Withdrawn->value);
+        }
 
         if ($keyword !== null && $keyword !== '') {
             $query->where(function ($q) use ($keyword) {
