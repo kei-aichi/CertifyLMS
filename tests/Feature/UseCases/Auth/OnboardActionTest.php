@@ -16,6 +16,7 @@ use App\UseCases\Auth\OnboardAction;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
+use RuntimeException;
 use Tests\TestCase;
 
 /**
@@ -148,6 +149,69 @@ class OnboardActionTest extends TestCase
             'amount' => 8,
             'note' => 'オンボーディング初期付与',
         ]);
+    }
+
+    public function test_rolls_back_user_invitation_and_related_records_when_onboarding_fails(): void
+    {
+        [$invitation, $user] = $this->setupInvitedUser(plan: $this->plan(quota: 8));
+
+        $user->refresh();
+        $initial = [
+            'name' => $user->name,
+            'password' => $user->password,
+            'profile_setup_completed' => $user->profile_setup_completed,
+            'email_verified_at' => $user->email_verified_at,
+            'plan_started_at' => $user->plan_started_at,
+            'plan_expires_at' => $user->plan_expires_at,
+        ];
+        $statusLogCount = $user->statusLogs()->count();
+        $quotaTransactionCount = $user->meetingQuotaTransactions()->count();
+
+        $failureInjected = false;
+        $eventDispatcher = Invitation::getEventDispatcher();
+        $testEventDispatcher = clone $eventDispatcher;
+        $testEventDispatcher->listen(
+            'eloquent.saving: '.Invitation::class,
+            function (Invitation $model) use (&$failureInjected, $invitation): void {
+                if (
+                    ! $failureInjected
+                    && $model->is($invitation)
+                    && $model->status === InvitationStatus::Accepted
+                ) {
+                    $failureInjected = true;
+                    throw new RuntimeException('テスト用オンボーディング失敗');
+                }
+            },
+        );
+        Invitation::setEventDispatcher($testEventDispatcher);
+
+        try {
+            $this->expectException(RuntimeException::class);
+
+            app(OnboardAction::class)($invitation, [
+                'name' => '更新後の氏名',
+                'password' => 'updated-password',
+            ]);
+        } finally {
+            try {
+                $user->refresh();
+                $invitation->refresh();
+
+                $this->assertSame($initial['name'], $user->name);
+                $this->assertSame($initial['password'], $user->password);
+                $this->assertSame($initial['profile_setup_completed'], $user->profile_setup_completed);
+                $this->assertEquals($initial['email_verified_at'], $user->email_verified_at);
+                $this->assertEquals($initial['plan_started_at'], $user->plan_started_at);
+                $this->assertEquals($initial['plan_expires_at'], $user->plan_expires_at);
+                $this->assertSame($statusLogCount, $user->statusLogs()->count());
+                $this->assertSame($quotaTransactionCount, $user->meetingQuotaTransactions()->count());
+                $this->assertSame(InvitationStatus::Pending, $invitation->status);
+                $this->assertNull($invitation->accepted_at);
+                $this->assertFalse(Auth::check());
+            } finally {
+                Invitation::setEventDispatcher($eventDispatcher);
+            }
+        }
     }
 
     public function test_saves_meeting_url_when_role_is_coach(): void
