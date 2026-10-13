@@ -45,6 +45,23 @@ class StoreRequestTest extends TestCase
         ]);
     }
 
+    #[DataProvider('validPassingScores')]
+    public function test_validation_passes_for_boundary_passing_score(int $passingScore): void
+    {
+        $admin = User::factory()->admin()->create();
+        $cert = Certification::factory()->published()->create();
+
+        $response = $this->actingAs($admin)->postJson(route('admin.mock-exams.store'), [
+            'certification_id' => $cert->id,
+            'title' => 'Boundary sample',
+            'order' => 0,
+            'passing_score' => $passingScore,
+        ]);
+
+        $response->assertRedirect();
+        $this->assertDatabaseHas('mock_exams', ['passing_score' => $passingScore]);
+    }
+
     #[DataProvider('invalidFieldPayloads')]
     public function test_validation_fails(string $invalidField, mixed $invalidValue): void
     {
@@ -134,6 +151,32 @@ class StoreRequestTest extends TestCase
         $response->assertForbidden();
     }
 
+    public function test_validation_fails_when_passing_score_is_missing(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $cert = Certification::factory()->published()->create();
+
+        $response = $this->actingAs($admin)->postJson(route('admin.mock-exams.store'), [
+            'certification_id' => $cert->id,
+            'title' => 'Sample',
+            'order' => 0,
+        ]);
+
+        $response->assertStatus(422)->assertJsonValidationErrors('passing_score');
+        $this->assertDatabaseCount('mock_exams', 0);
+    }
+
+    /**
+     * @return array<string, array{0: int}>
+     */
+    public static function validPassingScores(): array
+    {
+        return [
+            'passing_score 1' => [1],
+            'passing_score 100' => [100],
+        ];
+    }
+
     /**
      * @return array<string, array{0: string, 1: mixed}>
      */
@@ -147,7 +190,11 @@ class StoreRequestTest extends TestCase
             'order 65536 で 422' => ['order', 65536],
             'order 非整数で 422' => ['order', 'abc'],
             'passing_score 0 で 422' => ['passing_score', 0],
+            'passing_score 負数で 422' => ['passing_score', -1],
             'passing_score 101 で 422' => ['passing_score', 101],
+            'passing_score 150 で 422' => ['passing_score', 150],
+            'passing_score 小数で 422' => ['passing_score', 60.5],
+            'passing_score 空欄で 422' => ['passing_score', ''],
             'passing_score 非整数で 422' => ['passing_score', 'abc'],
         ];
     }

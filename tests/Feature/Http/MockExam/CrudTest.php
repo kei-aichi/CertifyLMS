@@ -37,6 +37,90 @@ class CrudTest extends TestCase
         $this->assertSame($admin->id, $mockExam->updated_by_user_id);
     }
 
+    public function test_admin_can_create_mock_exam_with_boundary_passing_scores(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $cert = Certification::factory()->published()->create();
+
+        foreach ([1, 100] as $passingScore) {
+            $this->actingAs($admin)
+                ->post(route('admin.mock-exams.store'), [
+                    'certification_id' => $cert->id,
+                    'title' => "Boundary {$passingScore}",
+                    'order' => $passingScore,
+                    'passing_score' => $passingScore,
+                ])
+                ->assertRedirect();
+        }
+
+        $this->assertDatabaseHas('mock_exams', ['passing_score' => 1]);
+        $this->assertDatabaseHas('mock_exams', ['passing_score' => 100]);
+    }
+
+    public function test_invalid_passing_score_is_not_saved_on_create(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $cert = Certification::factory()->published()->create();
+
+        $response = $this->actingAs($admin)->postJson(route('admin.mock-exams.store'), [
+            'certification_id' => $cert->id,
+            'title' => 'Invalid',
+            'order' => 0,
+            'passing_score' => 150,
+        ]);
+
+        $response->assertStatus(422)->assertJsonValidationErrors('passing_score');
+        $this->assertDatabaseCount('mock_exams', 0);
+    }
+
+    public function test_invalid_passing_score_keeps_existing_value_on_update(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $mockExam = MockExam::factory()->create(['passing_score' => 60]);
+
+        $this->actingAs($admin)
+            ->putJson(route('admin.mock-exams.update', $mockExam), [
+                'title' => 'Invalid update',
+                'order' => 0,
+                'passing_score' => 101,
+            ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('passing_score');
+
+        $this->assertDatabaseHas('mock_exams', [
+            'id' => $mockExam->id,
+            'passing_score' => 60,
+        ]);
+    }
+
+    public function test_form_validation_restores_invalid_passing_score_and_shows_error(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $cert = Certification::factory()->published()->create();
+
+        $this->actingAs($admin)
+            ->from(route('admin.mock-exams.create'))
+            ->post(route('admin.mock-exams.store'), [
+                'certification_id' => $cert->id,
+                'title' => 'Invalid form',
+                'order' => 0,
+                'passing_score' => 150,
+            ])
+            ->assertRedirect(route('admin.mock-exams.create'))
+            ->assertSessionHasErrors('passing_score')
+            ->assertSessionHasInput('passing_score', 150);
+    }
+
+    public function test_create_screen_shows_passing_score_hint(): void
+    {
+        $admin = User::factory()->admin()->create();
+
+        $this->actingAs($admin)
+            ->get(route('admin.mock-exams.create'))
+            ->assertOk()
+            ->assertSee('1〜100 の整数。受講生がこの百分率以上で合格');
+    }
+
     public function test_store_silently_drops_time_limit_minutes_field(): void
     {
         $admin = User::factory()->admin()->create();
@@ -102,6 +186,25 @@ class CrudTest extends TestCase
         $this->assertSame('改題後', $mockExam->title);
         $this->assertSame(80, $mockExam->passing_score);
         $this->assertSame($originalCertId, $mockExam->certification_id);
+    }
+
+    public function test_admin_can_update_mock_exam_with_boundary_passing_scores(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $mockExam = MockExam::factory()->create(['passing_score' => 60]);
+
+        foreach ([1, 100] as $passingScore) {
+            $this->actingAs($admin)
+                ->put(route('admin.mock-exams.update', $mockExam), [
+                    'title' => "Boundary {$passingScore}",
+                    'order' => $passingScore,
+                    'passing_score' => $passingScore,
+                ])
+                ->assertRedirect();
+
+            $mockExam->refresh();
+            $this->assertSame($passingScore, $mockExam->passing_score);
+        }
     }
 
     public function test_destroy_rejects_published_mock_exam(): void
