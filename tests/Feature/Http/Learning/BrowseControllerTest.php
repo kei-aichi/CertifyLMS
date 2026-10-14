@@ -107,6 +107,143 @@ class BrowseControllerTest extends TestCase
         $response->assertForbidden();
     }
 
+    public function test_show_chapter_and_section_forbidden_for_non_enrolled_student(): void
+    {
+        [$student, $part, $chapter, $section] = $this->buildContentTree();
+
+        $this->actingAs($student)
+            ->get(route('learning.chapters.show', $chapter))
+            ->assertForbidden();
+
+        $this->actingAs($student)
+            ->get(route('learning.sections.show', $section))
+            ->assertForbidden();
+    }
+
+    public function test_unenrolled_student_cannot_view_draft_part_chapter_or_section(): void
+    {
+        [$student, $part, $chapter, $section] = $this->buildContentTree(
+            partStatus: ContentStatus::Draft,
+            chapterStatus: ContentStatus::Draft,
+            sectionStatus: ContentStatus::Draft,
+        );
+
+        $this->actingAs($student)
+            ->get(route('learning.parts.show', $part))
+            ->assertForbidden();
+
+        $this->actingAs($student)
+            ->get(route('learning.chapters.show', $chapter))
+            ->assertForbidden();
+
+        $this->actingAs($student)
+            ->get(route('learning.sections.show', $section))
+            ->assertForbidden();
+    }
+
+    public function test_enrolled_student_cannot_view_draft_part_chapter_or_section(): void
+    {
+        [$student, $part, $chapter, $section] = $this->buildContentTree(
+            enrollmentStatus: EnrollmentStatus::Learning,
+            partStatus: ContentStatus::Draft,
+            chapterStatus: ContentStatus::Draft,
+            sectionStatus: ContentStatus::Draft,
+        );
+
+        $this->actingAs($student)
+            ->get(route('learning.parts.show', $part))
+            ->assertNotFound();
+
+        $this->actingAs($student)
+            ->get(route('learning.chapters.show', $chapter))
+            ->assertNotFound();
+
+        $this->actingAs($student)
+            ->get(route('learning.sections.show', $section))
+            ->assertNotFound();
+    }
+
+    public function test_failed_enrollment_cannot_view_part_chapter_or_section(): void
+    {
+        [$student, $part, $chapter, $section] = $this->buildContentTree(
+            enrollmentStatus: EnrollmentStatus::Failed,
+        );
+
+        $this->actingAs($student)
+            ->get(route('learning.parts.show', $part))
+            ->assertForbidden();
+
+        $this->actingAs($student)
+            ->get(route('learning.chapters.show', $chapter))
+            ->assertForbidden();
+
+        $this->actingAs($student)
+            ->get(route('learning.sections.show', $section))
+            ->assertForbidden();
+    }
+
+    public function test_soft_deleted_enrollment_cannot_view_part_chapter_or_section(): void
+    {
+        [$student, $part, $chapter, $section] = $this->buildContentTree(
+            enrollmentStatus: EnrollmentStatus::Learning,
+        );
+        $student->enrollments()->firstOrFail()->delete();
+
+        $this->actingAs($student)
+            ->get(route('learning.parts.show', $part))
+            ->assertForbidden();
+
+        $this->actingAs($student)
+            ->get(route('learning.chapters.show', $chapter))
+            ->assertForbidden();
+
+        $this->actingAs($student)
+            ->get(route('learning.sections.show', $section))
+            ->assertForbidden();
+    }
+
+    public function test_enrollment_belonging_to_another_student_cannot_grant_access(): void
+    {
+        [$student, $part, $chapter, $section] = $this->buildContentTree();
+        $otherStudent = User::factory()->student()->inProgress()->create();
+        Enrollment::factory()->for($otherStudent)->for($part->certification)->learning()->create();
+
+        $this->actingAs($student)
+            ->get(route('learning.parts.show', $part))
+            ->assertForbidden();
+
+        $this->actingAs($student)
+            ->get(route('learning.chapters.show', $chapter))
+            ->assertForbidden();
+
+        $this->actingAs($student)
+            ->get(route('learning.sections.show', $section))
+            ->assertForbidden();
+    }
+
+    public function test_unenrolled_section_does_not_create_or_update_learning_session(): void
+    {
+        [$student, $part, $chapter, $section] = $this->buildContentTree();
+        $openSession = LearningSession::factory()
+            ->forUser($student)
+            ->forEnrollment(Enrollment::factory()->for($student)->for($part->certification)->learning()->create())
+            ->open()
+            ->create();
+        $openSession->refresh();
+        $before = $openSession->getAttributes();
+        $countBefore = LearningSession::query()->count();
+
+        $student->enrollments()->firstOrFail()->delete();
+
+        $this->actingAs($student)
+            ->get(route('learning.sections.show', $section))
+            ->assertForbidden();
+
+        $openSession->refresh();
+        $this->assertSame($countBefore, LearningSession::query()->count());
+        $this->assertSame($before, $openSession->getAttributes());
+    }
+
     public function test_show_chapter_404_when_draft_part(): void
     {
         [$student, $certification] = $this->buildStudentAndCertification();
@@ -323,6 +460,36 @@ class BrowseControllerTest extends TestCase
         Enrollment::factory()->for($student)->for($certification)->state(['status' => $status->value])->create();
 
         return [$student, $certification];
+    }
+
+    /**
+     * @return array{0: User, 1: Part, 2: Chapter, 3: Section}
+     */
+    private function buildContentTree(
+        ?EnrollmentStatus $enrollmentStatus = null,
+        ContentStatus $partStatus = ContentStatus::Published,
+        ContentStatus $chapterStatus = ContentStatus::Published,
+        ContentStatus $sectionStatus = ContentStatus::Published,
+    ): array {
+        $student = User::factory()->student()->inProgress()->create();
+        $certification = Certification::factory()->published()->create();
+
+        if ($enrollmentStatus !== null) {
+            Enrollment::factory()
+                ->for($student)
+                ->for($certification)
+                ->state(['status' => $enrollmentStatus->value])
+                ->create();
+        }
+
+        $part = Part::factory()->for($certification)->create(['status' => $partStatus->value]);
+        $chapter = Chapter::factory()->for($part)->create(['status' => $chapterStatus->value]);
+        $section = Section::factory()->for($chapter)->create([
+            'status' => $sectionStatus->value,
+            'body' => '# テスト本文',
+        ]);
+
+        return [$student, $part, $chapter, $section];
     }
 
     /**
