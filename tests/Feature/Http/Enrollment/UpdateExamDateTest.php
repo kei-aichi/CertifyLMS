@@ -24,6 +24,9 @@ class UpdateExamDateTest extends TestCase
         $student = User::factory()->student()->inProgress()->create();
         $cert = Certification::factory()->published()->create();
         $enrollment = Enrollment::factory()->for($student)->for($cert)->learning()->create(['exam_date' => null]);
+        $otherEnrollment = Enrollment::factory()->for($student)->learning()->create([
+            'exam_date' => now()->addDays(45)->toDateString(),
+        ]);
         $examDate = now()->addDays(30)->toDateString();
 
         // Act
@@ -38,6 +41,17 @@ class UpdateExamDateTest extends TestCase
             'id' => $enrollment->id,
             'exam_date' => $examDate,
         ]);
+
+        $this->assertDatabaseHas('enrollments', [
+            'id' => $otherEnrollment->id,
+            'exam_date' => $otherEnrollment->exam_date->toDateString(),
+        ]);
+
+        $this->actingAs($student)
+            ->get(route('enrollments.show', $enrollment))
+            ->assertOk()
+            ->assertSee($examDate)
+            ->assertSee('目標受験日を更新しました。');
     }
 
     public function test_other_student_cannot_update_exam_date(): void
