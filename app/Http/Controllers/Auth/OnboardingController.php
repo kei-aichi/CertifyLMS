@@ -6,18 +6,24 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\OnboardingRequest;
+use App\Enums\InvitationStatus;
 use App\Models\Invitation;
 use App\Services\InvitationTokenService;
 use App\UseCases\Auth\OnboardAction;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\URL;
 use Illuminate\View\View;
 
 class OnboardingController extends Controller
 {
-    public function show(Request $request, Invitation $invitation, InvitationTokenService $tokenService): View
+    public function show(Request $request, Invitation $invitation, InvitationTokenService $tokenService): View|Response
     {
+        if ($request->hasValidSignature() && $invitation->status === InvitationStatus::Accepted) {
+            return response()->view('auth.invitation-invalid', status: 410);
+        }
+
         if (! $tokenService->verify($request, $invitation)) {
             return view('auth.invitation-invalid');
         }
