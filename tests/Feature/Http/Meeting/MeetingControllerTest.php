@@ -10,9 +10,14 @@ use App\Models\Certification;
 use App\Models\CoachAvailability;
 use App\Models\Enrollment;
 use App\Models\Meeting;
+use App\Models\MeetingQuotaTransaction;
 use App\Models\User;
+use App\Services\MeetingQuotaService;
 use Carbon\Carbon;
+use Closure;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -28,6 +33,55 @@ class MeetingControllerTest extends TestCase
             'assigned_at' => now(),
             'unassigned_at' => null,
         ]);
+    }
+
+    private function attachConsumedQuota(Meeting $meeting): void
+    {
+        $transaction = MeetingQuotaTransaction::factory()
+            ->consumed()
+            ->state([
+                'user_id' => $meeting->student_id,
+                'related_meeting_id' => $meeting->id,
+            ])
+            ->create();
+
+        $meeting->update(['meeting_quota_transaction_id' => $transaction->id]);
+    }
+
+    /**
+     * @param Closure(Meeting, MeetingQuotaTransaction): void $mutator
+     */
+    private function assertCancellationRejected(Closure $mutator): void
+    {
+        $student = User::factory()->student()->inProgress()->create(['max_meetings' => 5]);
+        $coach = User::factory()->coach()->create();
+        $meeting = Meeting::factory()->reserved()->forCoach($coach)->forStudent($student)->create([
+            'scheduled_at' => now()->addDays(3)->startOfHour(),
+        ]);
+        $transaction = MeetingQuotaTransaction::factory()
+            ->consumed()
+            ->state([
+                'user_id' => $student->id,
+                'related_meeting_id' => $meeting->id,
+            ])
+            ->create();
+        $meeting->update(['meeting_quota_transaction_id' => $transaction->id]);
+
+        $mutator($meeting, $transaction);
+        $response = $this->actingAs($student)->post(route('meetings.cancel', $meeting));
+
+        $response->assertRedirect();
+        $response->assertSessionHas('error');
+        $response->assertSessionMissing('success');
+        $fresh = $meeting->fresh();
+        $this->assertSame(MeetingStatus::Reserved, $fresh->status);
+        $this->assertNull($fresh->canceled_at);
+        $this->assertNull($fresh->canceled_by_user_id);
+        $this->assertDatabaseMissing('meeting_quota_transactions', [
+            'related_meeting_id' => $meeting->id,
+            'type' => MeetingQuotaTransactionType::Refunded->value,
+        ]);
+        $this->assertDatabaseCount('notifications', 0);
     }
 
     public function test_student_index_lists_only_own_meetings(): void
@@ -158,6 +212,7 @@ class MeetingControllerTest extends TestCase
         $meeting = Meeting::factory()->reserved()->forCoach($coach)->forStudent($student)->create([
             'scheduled_at' => now()->addDays(3)->startOfHour(),
         ]);
+        $this->attachConsumedQuota($meeting);
 
         $response = $this->actingAs($student)->post(route('meetings.cancel', $meeting));
 
@@ -326,18 +381,174 @@ class MeetingControllerTest extends TestCase
         $meeting = Meeting::factory()->reserved()->forCoach($coach)->forStudent($student)->create([
             'scheduled_at' => now()->addDays(3)->startOfHour(),
         ]);
+        $this->attachConsumedQuota($meeting);
 
         // Act
+        $before = app(MeetingQuotaService::class)->remaining($student);
         $response = $this->actingAs($student)->post(route('meetings.cancel', $meeting));
 
         // Assert: キャンセル成立 + 消費分 1 回が返却記録として作られる
         $response->assertRedirect();
         $this->assertSame(MeetingStatus::Canceled, $meeting->fresh()->status);
+        $this->assertSame($before + 1, app(MeetingQuotaService::class)->remaining($student));
         $this->assertDatabaseHas('meeting_quota_transactions', [
             'user_id' => $student->id,
             'related_meeting_id' => $meeting->id,
             'type' => MeetingQuotaTransactionType::Refunded->value,
             'amount' => 1,
+        ]);
+    }
+
+    public function test_cancel_rejects_when_quota_transaction_id_is_null(): void
+    {
+        $this->assertCancellationRejected(
+            fn (Meeting $meeting) => $meeting->update(['meeting_quota_transaction_id' => null]),
+        );
+    }
+
+    public function test_cancel_rejects_when_quota_transaction_does_not_exist(): void
+    {
+        $this->assertCancellationRejected(function (Meeting $meeting): void {
+            DB::statement('SET FOREIGN_KEY_CHECKS=0');
+            try {
+                $meeting->update(['meeting_quota_transaction_id' => (string) Str::ulid()]);
+            } finally {
+                DB::statement('SET FOREIGN_KEY_CHECKS=1');
+            }
+        });
+    }
+
+    public function test_cancel_rejects_when_quota_transaction_user_does_not_match_student(): void
+    {
+        $this->assertCancellationRejected(function (Meeting $meeting, MeetingQuotaTransaction $transaction): void {
+            $otherStudent = User::factory()->student()->create();
+            $transaction->update(['user_id' => $otherStudent->id]);
+        });
+    }
+
+    public function test_cancel_rejects_when_quota_transaction_meeting_does_not_match(): void
+    {
+        $this->assertCancellationRejected(function (Meeting $meeting, MeetingQuotaTransaction $transaction): void {
+            $otherMeeting = Meeting::factory()->reserved()->create();
+            $transaction->update(['related_meeting_id' => $otherMeeting->id]);
+        });
+    }
+
+    public function test_cancel_rejects_when_quota_transaction_type_is_not_consumed(): void
+    {
+        $this->assertCancellationRejected(
+            fn (Meeting $meeting, MeetingQuotaTransaction $transaction) => DB::table('meeting_quota_transactions')
+                ->where('id', $transaction->id)
+                ->update(['type' => MeetingQuotaTransactionType::Purchased->value, 'amount' => 1]),
+        );
+    }
+
+    public function test_cancel_rejects_when_quota_transaction_amount_is_not_minus_one(): void
+    {
+        $this->assertCancellationRejected(
+            fn (Meeting $meeting, MeetingQuotaTransaction $transaction) => $transaction->update(['amount' => -2]),
+        );
+    }
+
+    public function test_cancel_rolls_back_when_refund_fails(): void
+    {
+        $student = User::factory()->student()->inProgress()->create(['max_meetings' => 5]);
+        $coach = User::factory()->coach()->create();
+        $meeting = Meeting::factory()->reserved()->forCoach($coach)->forStudent($student)->create([
+            'scheduled_at' => now()->addDays(3)->startOfHour(),
+        ]);
+        $this->attachConsumedQuota($meeting);
+
+        $event = 'eloquent.creating: '.MeetingQuotaTransaction::class;
+        $listenerCalled = false;
+        Event::listen($event, static function (MeetingQuotaTransaction $transaction) use (&$listenerCalled): void {
+            if ($transaction->type === MeetingQuotaTransactionType::Refunded) {
+                $listenerCalled = true;
+                throw new \RuntimeException('refund insert failure');
+            }
+        });
+
+        $this->withoutExceptionHandling();
+        $exception = null;
+        try {
+            $this->actingAs($student)->post(route('meetings.cancel', $meeting));
+        } catch (\Throwable $caught) {
+            $exception = $caught;
+        } finally {
+            Event::forget($event);
+        }
+
+        $this->assertTrue($listenerCalled);
+        $this->assertInstanceOf(\RuntimeException::class, $exception);
+        $this->assertSame('refund insert failure', $exception?->getMessage());
+
+        $fresh = $meeting->fresh();
+        $this->assertSame(MeetingStatus::Reserved, $fresh->status);
+        $this->assertNull($fresh->canceled_at);
+        $this->assertNull($fresh->canceled_by_user_id);
+        $this->assertDatabaseMissing('meeting_quota_transactions', [
+            'related_meeting_id' => $meeting->id,
+            'type' => MeetingQuotaTransactionType::Refunded->value,
+        ]);
+        $this->assertDatabaseCount('notifications', 0);
+    }
+
+    public function test_second_cancel_does_not_refund_again(): void
+    {
+        $student = User::factory()->student()->inProgress()->create(['max_meetings' => 5]);
+        $coach = User::factory()->coach()->create();
+        $meeting = Meeting::factory()->reserved()->forCoach($coach)->forStudent($student)->create([
+            'scheduled_at' => now()->addDays(3)->startOfHour(),
+        ]);
+        $this->attachConsumedQuota($meeting);
+        $before = app(MeetingQuotaService::class)->remaining($student);
+
+        $this->actingAs($student)->post(route('meetings.cancel', $meeting))->assertRedirect();
+        $second = $this->actingAs($student)->post(route('meetings.cancel', $meeting));
+
+        $second->assertForbidden();
+        $this->assertSame($before + 1, app(MeetingQuotaService::class)->remaining($student));
+        $this->assertDatabaseCount('meeting_quota_transactions', 2);
+        $this->assertDatabaseCount('notifications', 1);
+    }
+
+    public function test_cancel_rejects_at_meeting_start_time(): void
+    {
+        $student = User::factory()->student()->inProgress()->create();
+        $coach = User::factory()->coach()->create();
+        $meeting = Meeting::factory()->reserved()->forCoach($coach)->forStudent($student)->create([
+            'scheduled_at' => now(),
+        ]);
+        $this->attachConsumedQuota($meeting);
+
+        $response = $this->actingAs($student)->post(route('meetings.cancel', $meeting));
+
+        $response->assertRedirect();
+        $response->assertSessionHas('error');
+        $this->assertSame(MeetingStatus::Reserved, $meeting->fresh()->status);
+        $this->assertDatabaseMissing('meeting_quota_transactions', [
+            'related_meeting_id' => $meeting->id,
+            'type' => MeetingQuotaTransactionType::Refunded->value,
+        ]);
+    }
+
+    public function test_cancel_rejects_after_meeting_start_time(): void
+    {
+        $student = User::factory()->student()->inProgress()->create();
+        $coach = User::factory()->coach()->create();
+        $meeting = Meeting::factory()->reserved()->forCoach($coach)->forStudent($student)->create([
+            'scheduled_at' => now()->subSecond(),
+        ]);
+        $this->attachConsumedQuota($meeting);
+
+        $response = $this->actingAs($student)->post(route('meetings.cancel', $meeting));
+
+        $response->assertRedirect();
+        $response->assertSessionHas('error');
+        $this->assertSame(MeetingStatus::Reserved, $meeting->fresh()->status);
+        $this->assertDatabaseMissing('meeting_quota_transactions', [
+            'related_meeting_id' => $meeting->id,
+            'type' => MeetingQuotaTransactionType::Refunded->value,
         ]);
     }
 }

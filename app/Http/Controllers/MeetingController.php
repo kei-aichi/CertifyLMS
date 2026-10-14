@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Enums\EnrollmentStatus;
+use App\Enums\MeetingQuotaTransactionType;
 use App\Enums\MeetingStatus;
 use App\Enums\UserStatus;
 use App\Exceptions\MeetingQuota\InsufficientMeetingQuotaException;
+use App\Exceptions\MeetingQuota\MeetingQuotaTransactionMismatchException;
 use App\Exceptions\Mentoring\MeetingAlreadyStartedException;
 use App\Exceptions\Mentoring\MeetingNoAvailableCoachException;
 use App\Exceptions\Mentoring\MeetingStatusTransitionException;
@@ -20,6 +22,7 @@ use App\Models\Certification;
 use App\Models\Enrollment;
 use App\Models\Meeting;
 use App\Models\MeetingMemo;
+use App\Models\MeetingQuotaTransaction;
 use App\Models\User;
 use App\Notifications\MeetingCanceledNotification;
 use App\Notifications\MeetingReservedNotification;
@@ -245,7 +248,7 @@ class MeetingController extends Controller
 
         $actor = auth()->user();
 
-        DB::transaction(function () use ($meeting, $actor) {
+        DB::transaction(function () use ($meeting, $actor, $refundAction) {
             $locked = Meeting::query()->whereKey($meeting->id)->lockForUpdate()->first();
             if ($locked === null || $locked->status !== MeetingStatus::Reserved) {
                 throw MeetingStatusTransitionException::forCancel();
@@ -255,11 +258,29 @@ class MeetingController extends Controller
                 throw new MeetingAlreadyStartedException;
             }
 
+            $transaction = $locked->meeting_quota_transaction_id === null
+                ? null
+                : MeetingQuotaTransaction::query()
+                    ->whereKey($locked->meeting_quota_transaction_id)
+                    ->first();
+
+            if (
+                $transaction === null
+                || $transaction->user_id !== $locked->student_id
+                || $transaction->related_meeting_id !== $locked->id
+                || $transaction->type !== MeetingQuotaTransactionType::Consumed
+                || $transaction->amount !== -1
+            ) {
+                throw new MeetingQuotaTransactionMismatchException;
+            }
+
             $locked->update([
                 'status' => MeetingStatus::Canceled->value,
                 'canceled_by_user_id' => $actor->id,
                 'canceled_at' => now(),
             ]);
+
+            $refundAction($locked->student, $locked->id);
 
             DB::afterCommit(function () use ($locked, $actor): void {
                 $locked->loadMissing(['coach', 'student', 'canceledBy']);

@@ -7,8 +7,10 @@ namespace Tests\Feature\Http\Meeting;
 use App\Enums\MeetingStatus;
 use App\Enums\UserStatus;
 use App\Models\Meeting;
+use App\Models\MeetingQuotaTransaction;
 use App\Models\User;
 use App\Notifications\MeetingCanceledNotification;
+use App\Services\MeetingQuotaService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Notifications\DatabaseNotification as LaravelDatabaseNotification;
 use Illuminate\Support\Facades\Event;
@@ -44,6 +46,7 @@ final class CancellationNotificationTest extends TestCase
     {
         Mail::fake();
         [$student, $coach, $meeting] = $this->meetingFixture();
+        $before = app(MeetingQuotaService::class)->remaining($student);
 
         $this->actingAs($coach)->post(route('meetings.cancel', $meeting))->assertRedirect();
 
@@ -54,6 +57,13 @@ final class CancellationNotificationTest extends TestCase
 
         $this->assertSame($coach->id, $notification->data['canceled_by_user_id']);
         $this->assertDatabaseMissing('notifications', ['notifiable_id' => $coach->id]);
+        $this->assertSame($before + 1, app(MeetingQuotaService::class)->remaining($student));
+        $this->assertDatabaseHas('meeting_quota_transactions', [
+            'user_id' => $student->id,
+            'related_meeting_id' => $meeting->id,
+            'type' => 'refunded',
+            'amount' => 1,
+        ]);
     }
 
     public function test_only_in_progress_recipient_is_notified(): void
@@ -97,6 +107,15 @@ final class CancellationNotificationTest extends TestCase
         $meeting = Meeting::factory()->reserved()->forStudent($student)->forCoach($coach)->create([
             'scheduled_at' => now()->addDays(3)->startOfHour(),
         ]);
+
+        $transaction = MeetingQuotaTransaction::factory()
+            ->consumed()
+            ->state([
+                'user_id' => $student->id,
+                'related_meeting_id' => $meeting->id,
+            ])
+            ->create();
+        $meeting->update(['meeting_quota_transaction_id' => $transaction->id]);
 
         return [$student, $coach, $meeting];
     }
