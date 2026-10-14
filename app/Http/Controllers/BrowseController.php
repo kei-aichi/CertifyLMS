@@ -13,6 +13,7 @@ use App\UseCases\Learning\ShowChapterAction;
 use App\UseCases\Learning\ShowEnrollmentAction;
 use App\UseCases\Learning\ShowPartAction;
 use App\UseCases\Learning\ShowSectionAction;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
 
@@ -42,16 +43,22 @@ class BrowseController extends Controller
 
     public function showPart(Part $part, ShowPartAction $action): View
     {
+        Gate::authorize('learning.part.view', $part);
+
         return view('learning.parts.show', $action($part, auth()->user()));
     }
 
     public function showChapter(Chapter $chapter, ShowChapterAction $action): View
     {
+        Gate::authorize('learning.chapter.view', $chapter);
+
         return view('learning.chapters.show', $action($chapter, auth()->user()));
     }
 
     public function showSection(Section $section, ShowSectionAction $action): View
     {
+        Gate::authorize('learning.section.view', $section);
+
         return view('learning.sections.show', $action($section, auth()->user()));
     }
 }
