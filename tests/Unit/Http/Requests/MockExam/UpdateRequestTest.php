@@ -30,6 +30,15 @@ class UpdateRequestTest extends TestCase
         $this->assertTrue($validator->passes(), $validator->errors()->toJson());
     }
 
+    #[DataProvider('validPassingScores')]
+    public function test_passes_for_boundary_passing_score(int $passingScore): void
+    {
+        $payload = ['title' => 'Sample', 'order' => 0, 'passing_score' => $passingScore];
+        $validator = Validator::make($payload, (new UpdateRequest)->rules());
+
+        $this->assertTrue($validator->passes(), $validator->errors()->toJson());
+    }
+
     #[DataProvider('invalidCases')]
     public function test_fails_for_invalid_field(string $field, mixed $value): void
     {
@@ -44,6 +53,15 @@ class UpdateRequestTest extends TestCase
         $this->assertArrayHasKey($field, $validator->errors()->toArray());
     }
 
+    public function test_fails_when_passing_score_is_missing(): void
+    {
+        $payload = ['title' => 'Sample', 'order' => 0];
+        $validator = Validator::make($payload, (new UpdateRequest)->rules());
+
+        $this->assertTrue($validator->fails());
+        $this->assertArrayHasKey('passing_score', $validator->errors()->toArray());
+    }
+
     /**
      * @return array<string, array{0: string, 1: mixed}>
      */
@@ -56,7 +74,23 @@ class UpdateRequestTest extends TestCase
             'order 負数で エラー' => ['order', -1],
             'order 65536 で エラー' => ['order', 65536],
             'passing_score 0 で エラー' => ['passing_score', 0],
+            'passing_score 負数で エラー' => ['passing_score', -1],
             'passing_score 101 で エラー' => ['passing_score', 101],
+            'passing_score 150 で エラー' => ['passing_score', 150],
+            'passing_score 小数で エラー' => ['passing_score', 60.5],
+            'passing_score 空欄で エラー' => ['passing_score', ''],
+            'passing_score 文字列で エラー' => ['passing_score', 'abc'],
+        ];
+    }
+
+    /**
+     * @return array<string, array{0: int}>
+     */
+    public static function validPassingScores(): array
+    {
+        return [
+            'passing_score 1' => [1],
+            'passing_score 100' => [100],
         ];
     }
 }
