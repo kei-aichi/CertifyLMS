@@ -21,8 +21,10 @@ class DestroyTest extends TestCase
 
         $response = $this->actingAs($admin)->delete(route('admin.certification-categories.destroy', $category));
 
-        $response->assertRedirect(route('admin.certification-categories.index'));
-        $response->assertSessionHas('success');
+        $response
+            ->assertStatus(302)
+            ->assertRedirect(route('admin.certification-categories.index'))
+            ->assertSessionHas('success', '分類を削除しました。');
         $this->assertDatabaseMissing('certification_categories', ['id' => $category->id]);
     }
 
