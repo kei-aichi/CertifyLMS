@@ -21,8 +21,10 @@ class DestroyTest extends TestCase
 
         $response = $this->actingAs($admin)->delete(route('admin.certification-categories.destroy', $category));
 
-        $response->assertRedirect(route('admin.certification-categories.index'));
-        $response->assertSessionHas('success');
+        $response
+            ->assertStatus(302)
+            ->assertRedirect(route('admin.certification-categories.index'))
+            ->assertSessionHas('success', '分類を削除しました。');
         $this->assertDatabaseMissing('certification_categories', ['id' => $category->id]);
     }
 
@@ -35,6 +37,41 @@ class DestroyTest extends TestCase
         $response = $this->actingAs($admin)->deleteJson(route('admin.certification-categories.destroy', $category));
 
         $response->assertStatus(409);
+        $response->assertSessionMissing('success');
+        $this->assertDatabaseHas('certification_categories', ['id' => $category->id]);
+    }
+
+    public function test_coach_cannot_delete_category(): void
+    {
+        $coach = User::factory()->coach()->create();
+        $category = CertificationCategory::factory()->create();
+
+        $response = $this->actingAs($coach)->delete(route('admin.certification-categories.destroy', $category));
+
+        $response->assertForbidden();
+        $this->assertDatabaseHas('certification_categories', ['id' => $category->id]);
+    }
+
+    public function test_student_cannot_delete_category(): void
+    {
+        $student = User::factory()->student()->create();
+        $category = CertificationCategory::factory()->create();
+
+        $response = $this->actingAs($student)->delete(route('admin.certification-categories.destroy', $category));
+
+        $response->assertForbidden();
+        $this->assertDatabaseHas('certification_categories', ['id' => $category->id]);
+    }
+
+    public function test_guest_cannot_delete_category(): void
+    {
+        $category = CertificationCategory::factory()->create();
+
+        $response = $this->delete(route('admin.certification-categories.destroy', $category));
+
+        $response
+            ->assertStatus(302)
+            ->assertRedirect('/login');
         $this->assertDatabaseHas('certification_categories', ['id' => $category->id]);
     }
 }
