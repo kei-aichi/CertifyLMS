@@ -389,6 +389,10 @@ class MeetingControllerTest extends TestCase
 
         // Assert: キャンセル成立 + 消費分 1 回が返却記録として作られる
         $response->assertRedirect();
+        $response->assertSessionHas(
+            'success',
+            '面談をキャンセルしました。面談回数を返却しました。'
+        );
         $this->assertSame(MeetingStatus::Canceled, $meeting->fresh()->status);
         $this->assertSame($before + 1, app(MeetingQuotaService::class)->remaining($student));
         $this->assertDatabaseHas('meeting_quota_transactions', [
