@@ -85,6 +85,20 @@ class ReadTest extends TestCase
         }
     }
 
+    public function test_graduated_student_cannot_view_existing_question_or_reply(): void
+    {
+        $student = User::factory()->student()->graduated()->create();
+        $thread = QaThread::factory()->for($student)->create();
+        QaReply::factory()->for($thread, 'qaThread')->for($student)->create();
+
+        $this->actingAs($student)->get(route('qa-board.index'))->assertForbidden();
+        $this->get(route('qa-board.show', $thread))->assertForbidden();
+        $this->get(route('qa-board.create'))->assertForbidden();
+        $this->get(route('qa-board.edit', $thread))->assertForbidden();
+        $reply = $thread->replies()->firstOrFail();
+        $this->get(route('qa-board.replies.edit', [$thread, $reply]))->assertForbidden();
+    }
+
     public function test_search_includes_title_question_and_reply_without_leaking_hidden_threads(): void
     {
         $title = QaThread::factory()->create(['title' => '固有検索語を含む', 'body' => '本文']);
