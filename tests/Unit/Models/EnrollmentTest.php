@@ -181,6 +181,88 @@ class EnrollmentTest extends TestCase
         $this->assertTrue($results->first()->is($assigned));
     }
 
+    public function test_scope_for_user_coach_returns_enrollments_for_all_assigned_certifications(): void
+    {
+        $coach = User::factory()->coach()->create();
+        $admin = User::factory()->admin()->create();
+        $certifications = Certification::factory()->published()->count(2)->create();
+
+        foreach ($certifications as $certification) {
+            CertificationCoachAssignment::create([
+                'certification_id' => $certification->id,
+                'user_id' => $coach->id,
+                'assigned_by_user_id' => $admin->id,
+                'assigned_at' => now(),
+            ]);
+            Enrollment::factory()->for($certification)->create();
+        }
+        $outside = Enrollment::factory()->create();
+
+        $results = Enrollment::forUser($coach)->get();
+
+        $this->assertCount(2, $results);
+        $this->assertEqualsCanonicalizing($certifications->pluck('id')->all(), $results->pluck('certification_id')->all());
+        $this->assertFalse($results->contains($outside));
+    }
+
+    public function test_scope_for_user_coach_returns_no_enrollments_without_assignments(): void
+    {
+        $coach = User::factory()->coach()->create();
+        $enrollment = Enrollment::factory()->create();
+
+        $results = Enrollment::forUser($coach)->get();
+
+        $this->assertCount(0, $results);
+        $this->assertFalse($results->contains($enrollment));
+    }
+
+    public function test_scope_for_user_coach_excludes_unassigned_certification(): void
+    {
+        $coach = User::factory()->coach()->create();
+        $assignment = CertificationCoachAssignment::factory()->unassigned()->create(['user_id' => $coach->id]);
+        $enrollment = Enrollment::factory()->create(['certification_id' => $assignment->certification_id]);
+
+        $results = Enrollment::forUser($coach)->get();
+
+        $this->assertCount(0, $results);
+        $this->assertFalse($results->contains($enrollment));
+    }
+
+    public function test_scope_for_user_coach_does_not_duplicate_enrollment_when_other_coach_is_also_assigned(): void
+    {
+        $coach = User::factory()->coach()->create();
+        $otherCoach = User::factory()->coach()->create();
+        $certification = Certification::factory()->published()->create();
+        CertificationCoachAssignment::factory()->create([
+            'certification_id' => $certification->id,
+            'user_id' => $coach->id,
+        ]);
+        CertificationCoachAssignment::factory()->create([
+            'certification_id' => $certification->id,
+            'user_id' => $otherCoach->id,
+        ]);
+        $enrollment = Enrollment::factory()->for($certification)->create();
+
+        $results = Enrollment::forUser($coach)->get();
+
+        $this->assertCount(1, $results);
+        $this->assertTrue($results->first()->is($enrollment));
+    }
+
+    public function test_scope_for_user_preserves_admin_and_student_ranges(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $student = User::factory()->student()->create();
+        $own = Enrollment::factory()->for($student)->create();
+        $other = Enrollment::factory()->create();
+
+        $this->assertEqualsCanonicalizing(
+            [$own->id, $other->id],
+            Enrollment::forUser($admin)->pluck('id')->all(),
+        );
+        $this->assertSame([$own->id], Enrollment::forUser($student)->pluck('id')->all());
+    }
+
     public function test_scope_for_user_student_returns_only_own_enrollments(): void
     {
         // Arrange
