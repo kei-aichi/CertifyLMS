@@ -126,6 +126,33 @@ class MeetingControllerTest extends TestCase
         $this->actingAs($coach)->get(route('meetings.show', $meeting))->assertOk();
     }
 
+    public function test_admin_can_view_any_meeting(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $student = User::factory()->student()->inProgress()->create();
+        $coach = User::factory()->coach()->create();
+        $meeting = Meeting::factory()->reserved()->forCoach($coach)->forStudent($student)->create();
+
+        $this->actingAs($admin)
+            ->get(route('meetings.show', $meeting))
+            ->assertOk();
+    }
+
+    public function test_non_active_student_cannot_view_or_cancel_own_meeting(): void
+    {
+        foreach (['graduated', 'invited', 'withdrawn'] as $status) {
+            $student = User::factory()->student()->create(['status' => $status]);
+            $coach = User::factory()->coach()->create();
+            $meeting = Meeting::factory()->reserved()->forCoach($coach)->forStudent($student)->create([
+                'scheduled_at' => now()->addDays(3)->startOfHour(),
+            ]);
+
+            $this->actingAs($student)->get(route('meetings.show', $meeting))->assertForbidden();
+            $this->actingAs($student)->post(route('meetings.cancel', $meeting))->assertForbidden();
+            $this->assertSame(MeetingStatus::Reserved, $meeting->fresh()->status);
+        }
+    }
+
     public function test_create_requires_enrollment_ownership(): void
     {
         $student = User::factory()->student()->inProgress()->create();
