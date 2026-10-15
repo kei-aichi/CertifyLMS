@@ -139,6 +139,7 @@ class OnboardingTest extends TestCase
         $this->post($this->postUrl($invitation), [
             'name' => '初回登録',
             'password' => 'secret-pass',
+            'password_confirmation' => 'secret-pass',
         ])->assertRedirect(route('dashboard.index'));
 
         $user = $invitation->user->fresh();
