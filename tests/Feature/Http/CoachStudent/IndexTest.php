@@ -88,6 +88,39 @@ class IndexTest extends TestCase
         $response->assertOk()->assertViewHas('enrollments', fn ($rows) => $rows->total() === 2);
     }
 
+    public function test_coach_keeps_enrollment_visible_when_student_is_soft_deleted(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $coach = User::factory()->coach()->create();
+        $student = User::factory()->student()->create([
+            'name' => 'Deleted Student Name',
+            'email' => 'deleted-student@example.test',
+        ]);
+        $certification = Certification::factory()->published()->create(['name' => 'Assigned Cert']);
+        CertificationCoachAssignment::create([
+            'certification_id' => $certification->id,
+            'user_id' => $coach->id,
+            'assigned_by_user_id' => $admin->id,
+            'assigned_at' => now(),
+        ]);
+        $enrollment = Enrollment::factory()->for($student)->for($certification)->learning()->create();
+        $student->delete();
+
+        $response = $this->actingAs($coach)->get(route('enrollments.index'));
+
+        $response->assertOk()
+            ->assertViewHas('enrollments', function ($rows) use ($enrollment) {
+                return $rows->total() === 1
+                    && $rows->first()->is($enrollment)
+                    && $rows->first()->relationLoaded('user')
+                    && $rows->first()->user === null;
+            })
+            ->assertSee('Assigned Cert')
+            ->assertSee('>-<', false)
+            ->assertDontSee('Deleted Student Name')
+            ->assertDontSee('deleted-student@example.test');
+    }
+
     public function test_coach_with_no_assigned_certifications_sees_empty_list(): void
     {
         $coach = User::factory()->coach()->create();
