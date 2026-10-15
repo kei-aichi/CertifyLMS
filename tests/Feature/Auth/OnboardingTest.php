@@ -272,6 +272,62 @@ class OnboardingTest extends TestCase
         ]);
     }
 
+    public function test_store_allows_login_again_after_logout(): void
+    {
+        $invitation = $this->freshInvitation();
+
+        $this->post($this->postUrl($invitation), [
+            'name' => '受講太郎',
+            'password' => 'secret-pass',
+            'password_confirmation' => 'secret-pass',
+        ]);
+
+        $this->assertAuthenticatedAs($invitation->user);
+        $this->assertDatabaseHas('users', [
+            'id' => $invitation->user_id,
+            'status' => UserStatus::InProgress->value,
+        ]);
+
+        $this->post('/logout')->assertRedirect('/');
+        $this->assertGuest();
+
+        $this->from('/login')->post('/login', [
+            'email' => $invitation->email,
+            'password' => 'secret-pass',
+        ])->assertRedirect(config('fortify.home'));
+
+        $this->assertAuthenticatedAs($invitation->user);
+    }
+
+    public function test_coach_can_login_again_after_logout(): void
+    {
+        $invitation = $this->freshInvitation(UserRole::Coach);
+
+        $this->post($this->postUrl($invitation), [
+            'name' => 'コーチ太郎',
+            'meeting_url' => 'https://meet.google.com/abc-defg-hij',
+            'password' => 'secret-pass',
+            'password_confirmation' => 'secret-pass',
+        ]);
+
+        $this->assertAuthenticatedAs($invitation->user);
+        $this->assertDatabaseHas('users', [
+            'id' => $invitation->user_id,
+            'status' => UserStatus::InProgress->value,
+            'meeting_url' => 'https://meet.google.com/abc-defg-hij',
+        ]);
+
+        $this->post('/logout')->assertRedirect('/');
+        $this->assertGuest();
+
+        $this->from('/login')->post('/login', [
+            'email' => $invitation->email,
+            'password' => 'secret-pass',
+        ])->assertRedirect(config('fortify.home'));
+
+        $this->assertAuthenticatedAs($invitation->user);
+    }
+
     public function test_store_does_not_create_new_user_row(): void
     {
         $invitation = $this->freshInvitation();
