@@ -20,6 +20,34 @@ class LifecycleTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_graduated_student_cannot_create_start_or_cancel_session(): void
+    {
+        $student = User::factory()->student()->graduated()->create();
+        $cert = Certification::factory()->published()->create();
+        $enrollment = Enrollment::factory()->for($student)->for($cert)->learning()->create();
+        $mockExam = MockExam::factory()->forCertification($cert)->published()->create();
+        MockExamQuestion::factory()->forMockExam($mockExam)->withOptions()->create();
+        $session = MockExamSession::factory()
+            ->forUser($student)
+            ->forEnrollment($enrollment)
+            ->forMockExam($mockExam)
+            ->notStarted()
+            ->create();
+
+        $this->actingAs($student)
+            ->post(route('mock-exam.sessions.store', ['enrollment' => $enrollment, 'mockExam' => $mockExam]))
+            ->assertForbidden();
+        $this->actingAs($student)
+            ->post(route('mock-exam-sessions.start', $session))
+            ->assertForbidden();
+        $this->actingAs($student)
+            ->delete(route('mock-exam-sessions.destroy', $session))
+            ->assertForbidden();
+
+        $this->assertDatabaseCount('mock_exam_sessions', 1);
+        $this->assertSame(MockExamSessionStatus::NotStarted, $session->fresh()->status);
+    }
+
     public function test_store_creates_not_started_session_with_question_snapshot(): void
     {
         $student = User::factory()->student()->create();
@@ -185,6 +213,19 @@ class LifecycleTest extends TestCase
         $this->actingAs($student)
             ->postJson(route('mock-exam-sessions.submit', $session))
             ->assertStatus(409);
+    }
+
+    public function test_graduated_student_cannot_submit_session(): void
+    {
+        $student = User::factory()->student()->inProgress()->create();
+        $session = MockExamSession::factory()->forUser($student)->inProgress()->create();
+        $student->update(['status' => 'graduated']);
+
+        $this->actingAs($student->fresh())
+            ->post(route('mock-exam-sessions.submit', $session))
+            ->assertForbidden();
+
+        $this->assertSame(MockExamSessionStatus::InProgress, $session->fresh()->status);
     }
 
     public function test_destroy_cancels_not_started_session(): void

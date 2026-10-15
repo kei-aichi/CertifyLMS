@@ -70,6 +70,18 @@ class IndexShowTest extends TestCase
             ->assertForbidden();
     }
 
+    public function test_graduated_user_cannot_view_mock_exam_detail(): void
+    {
+        $student = User::factory()->student()->graduated()->create();
+        $cert = Certification::factory()->published()->create();
+        $enrollment = Enrollment::factory()->for($student)->for($cert)->passed()->create();
+        $mockExam = MockExam::factory()->forCertification($cert)->published()->create();
+
+        $this->actingAs($student)
+            ->get(route('mock-exam.catalog.show', ['enrollment' => $enrollment, 'mockExam' => $mockExam]))
+            ->assertForbidden();
+    }
+
     public function test_show_returns_404_when_mock_exam_belongs_to_other_certification(): void
     {
         $student = User::factory()->student()->create();
