@@ -311,6 +311,35 @@ class MeetingControllerTest extends TestCase
         $response->assertForbidden();
     }
 
+    public function test_graduated_student_cannot_fetch_availability(): void
+    {
+        $student = User::factory()->student()->graduated()->create();
+        $certification = Certification::factory()->published()->create();
+        $enrollment = Enrollment::factory()->for($student, 'user')->for($certification)->learning()->create();
+
+        $date = now()->startOfDay()->next(Carbon::MONDAY)->format('Y-m-d');
+        $this->actingAs($student)
+            ->getJson(route('meetings.availability', $enrollment)."?date={$date}")
+            ->assertForbidden();
+    }
+
+    public function test_graduated_student_cannot_store_meeting(): void
+    {
+        $student = User::factory()->student()->graduated()->create(['max_meetings' => 3]);
+        $certification = Certification::factory()->published()->create();
+        $enrollment = Enrollment::factory()->for($student, 'user')->for($certification)->learning()->create();
+        $scheduledAt = now()->startOfDay()->next(Carbon::MONDAY)->setTime(10, 0);
+
+        $this->actingAs($student)
+            ->post(route('meetings.store', $enrollment), [
+                'scheduled_at' => $scheduledAt->format('Y-m-d\\TH:i:s'),
+                'topic' => 'blocked',
+            ])
+            ->assertForbidden();
+
+        $this->assertDatabaseCount('meetings', 0);
+    }
+
     public function test_store_blocks_double_booking_for_same_coach_and_slot(): void
     {
         // Arrange: 予約可能コンテキスト + 同コーチ・同時刻に canceled 面談を 1 件先在させる。
