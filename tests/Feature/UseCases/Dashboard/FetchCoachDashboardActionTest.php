@@ -7,6 +7,9 @@ namespace Tests\Feature\UseCases\Dashboard;
 use App\Enums\EnrollmentStatus;
 use App\Enums\MeetingStatus;
 use App\Models\Certification;
+use App\Models\ChatMember;
+use App\Models\ChatMessage;
+use App\Models\ChatRoom;
 use App\Models\Enrollment;
 use App\Models\LearningSession;
 use App\Models\Meeting;
@@ -136,6 +139,42 @@ class FetchCoachDashboardActionTest extends TestCase
         $vm = app(FetchCoachDashboardAction::class)($coach);
 
         $this->assertNull($vm->unreadChatCount);
+    }
+
+    public function test_unread_chat_count_and_summary_exclude_coachs_own_messages(): void
+    {
+        $coach = User::factory()->coach()->inProgress()->create();
+        $student = User::factory()->student()->inProgress()->create();
+
+        $ownEnrollment = Enrollment::factory()->for($student)->create();
+        $ownRoom = ChatRoom::factory()->for($ownEnrollment)->create();
+        ChatMember::factory()->create([
+            'chat_room_id' => $ownRoom->id,
+            'user_id' => $coach->id,
+            'last_read_at' => null,
+        ]);
+        ChatMessage::factory()->create([
+            'chat_room_id' => $ownRoom->id,
+            'sender_user_id' => $coach->id,
+        ]);
+
+        $unreadEnrollment = Enrollment::factory()->for($student)->create();
+        $unreadRoom = ChatRoom::factory()->for($unreadEnrollment)->create();
+        ChatMember::factory()->create([
+            'chat_room_id' => $unreadRoom->id,
+            'user_id' => $coach->id,
+            'last_read_at' => null,
+        ]);
+        ChatMessage::factory()->create([
+            'chat_room_id' => $unreadRoom->id,
+            'sender_user_id' => $student->id,
+        ]);
+
+        $vm = app(FetchCoachDashboardAction::class)($coach);
+
+        $this->assertSame(1, $vm->unreadChatCount);
+        $this->assertCount(1, $vm->recentUnreadChatRooms);
+        $this->assertSame($unreadRoom->id, $vm->recentUnreadChatRooms->first()->id);
     }
 
     private function attachCoach(Certification $certification, User $coach): void

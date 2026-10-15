@@ -92,6 +92,70 @@ class ShowTest extends TestCase
         $response->assertSee('aria-label="未読 2 件"', false);
     }
 
+    public function test_student_sidebar_and_rooms_pane_exclude_own_messages_from_unread_counts(): void
+    {
+        $student = User::factory()->student()->inProgress()->create();
+        $coach = User::factory()->coach()->inProgress()->create();
+        $currentEnrollment = Enrollment::factory()->for($student)->create();
+        $currentRoom = ChatRoom::factory()->for($currentEnrollment)->create();
+        ChatMember::factory()->create([
+            'chat_room_id' => $currentRoom->id,
+            'user_id' => $student->id,
+            'last_read_at' => null,
+        ]);
+
+        $unreadEnrollment = Enrollment::factory()->for($student)->create();
+        $unreadRoom = ChatRoom::factory()->for($unreadEnrollment)->create();
+        ChatMember::factory()->create([
+            'chat_room_id' => $unreadRoom->id,
+            'user_id' => $student->id,
+            'last_read_at' => null,
+        ]);
+        ChatMessage::factory()->create(['chat_room_id' => $unreadRoom->id, 'sender_user_id' => $student->id]);
+        ChatMessage::factory()->create(['chat_room_id' => $unreadRoom->id, 'sender_user_id' => $coach->id]);
+
+        $response = $this->actingAs($student)->get(route('chat.show', $currentRoom));
+
+        $response->assertOk();
+        $response->assertSee('aria-label="未読 1 件"', false);
+        $this->assertMatchesRegularExpression(
+            '/<span class="flex-1 truncate">chat<\/span>.*?tnum">\s*1\s*<\/span>/s',
+            $response->getContent(),
+        );
+    }
+
+    public function test_coach_sidebar_and_rooms_pane_exclude_own_messages_from_unread_counts(): void
+    {
+        $student = User::factory()->student()->inProgress()->create();
+        $coach = User::factory()->coach()->inProgress()->create();
+        $currentEnrollment = Enrollment::factory()->for($student)->create();
+        $currentRoom = ChatRoom::factory()->for($currentEnrollment)->create();
+        ChatMember::factory()->create([
+            'chat_room_id' => $currentRoom->id,
+            'user_id' => $coach->id,
+            'last_read_at' => null,
+        ]);
+
+        $unreadEnrollment = Enrollment::factory()->for($student)->create();
+        $unreadRoom = ChatRoom::factory()->for($unreadEnrollment)->create();
+        ChatMember::factory()->create([
+            'chat_room_id' => $unreadRoom->id,
+            'user_id' => $coach->id,
+            'last_read_at' => null,
+        ]);
+        ChatMessage::factory()->create(['chat_room_id' => $unreadRoom->id, 'sender_user_id' => $coach->id]);
+        ChatMessage::factory()->create(['chat_room_id' => $unreadRoom->id, 'sender_user_id' => $student->id]);
+
+        $response = $this->actingAs($coach)->get(route('chat.show', $currentRoom));
+
+        $response->assertOk();
+        $response->assertSee('aria-label="未読 1 件"', false);
+        $this->assertMatchesRegularExpression(
+            '/<span class="flex-1 truncate">chat 対応<\/span>.*?tnum">\s*1\s*<\/span>/s',
+            $response->getContent(),
+        );
+    }
+
     public function test_admin_can_view_via_admin_route_without_updating_last_read_at(): void
     {
         $student = User::factory()->student()->inProgress()->create();
