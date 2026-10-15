@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Middleware;
 
 use App\Http\Middleware\EnsureActiveLearning;
+use App\Models\Enrollment;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Route;
@@ -39,6 +40,27 @@ class EnsureActiveLearningTest extends TestCase
             ->get('/__test/ensure-active-learning')
             ->assertOk()
             ->assertSee('ok');
+    }
+
+    public function test_in_progress_user_with_expired_plan_passes(): void
+    {
+        $user = User::factory()->student()->inProgress()->create([
+            'plan_expires_at' => now()->subDay(),
+        ]);
+
+        $this->actingAs($user)
+            ->get('/__test/ensure-active-learning')
+            ->assertOk();
+    }
+
+    public function test_in_progress_user_with_passed_enrollment_passes(): void
+    {
+        $user = User::factory()->student()->inProgress()->create();
+        Enrollment::factory()->for($user)->passed()->create();
+
+        $this->actingAs($user)
+            ->get('/__test/ensure-active-learning')
+            ->assertOk();
     }
 
     public function test_in_progress_coach_passes(): void
