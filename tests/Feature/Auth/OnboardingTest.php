@@ -139,6 +139,7 @@ class OnboardingTest extends TestCase
         $this->post($this->postUrl($invitation), [
             'name' => '初回登録',
             'password' => 'secret-pass',
+            'password_confirmation' => 'secret-pass',
         ])->assertRedirect(route('dashboard.index'));
 
         $user = $invitation->user->fresh();
@@ -380,6 +381,10 @@ class OnboardingTest extends TestCase
     public function test_store_rejects_mismatched_password_confirmation(): void
     {
         $invitation = $this->freshInvitation();
+        $userBefore = $invitation->user->fresh();
+        $passwordBefore = $userBefore->password;
+        $statusLogCount = $userBefore->statusLogs()->count();
+        $quotaTransactionCount = $userBefore->meetingQuotaTransactions()->count();
 
         $response = $this->from($this->signedShowUrl($invitation))->post($this->postUrl($invitation), [
             'name' => '受講太郎',
@@ -392,6 +397,82 @@ class OnboardingTest extends TestCase
             'id' => $invitation->user_id,
             'status' => UserStatus::Invited->value,
         ]);
+        $this->assertSame($passwordBefore, $invitation->user->fresh()->password);
+        $this->assertSame($statusLogCount, $invitation->user->fresh()->statusLogs()->count());
+        $this->assertSame($quotaTransactionCount, $invitation->user->fresh()->meetingQuotaTransactions()->count());
+        $this->assertSame(InvitationStatus::Pending, $invitation->fresh()->status);
+        $this->assertNull($invitation->fresh()->accepted_at);
+        $this->assertGuest();
+    }
+
+    public function test_store_rejects_mismatched_password_confirmation_as_json(): void
+    {
+        $invitation = $this->freshInvitation();
+
+        $response = $this->postJson($this->postUrl($invitation), [
+            'name' => '受講太郎',
+            'password' => 'secret-pass',
+            'password_confirmation' => 'different-pass',
+        ]);
+
+        $response->assertUnprocessable()->assertJsonValidationErrors('password');
+        $this->assertDatabaseHas('users', [
+            'id' => $invitation->user_id,
+            'status' => UserStatus::Invited->value,
+            'password' => null,
+        ]);
+        $this->assertDatabaseHas('invitations', [
+            'id' => $invitation->id,
+            'status' => InvitationStatus::Pending->value,
+            'accepted_at' => null,
+        ]);
+        $this->assertGuest();
+    }
+
+    public function test_store_rejects_missing_password_confirmation(): void
+    {
+        $invitation = $this->freshInvitation();
+
+        $response = $this->from($this->signedShowUrl($invitation))->post($this->postUrl($invitation), [
+            'name' => '受講太郎',
+            'password' => 'secret-pass',
+        ]);
+
+        $response->assertSessionHasErrors('password');
+        $this->assertDatabaseHas('users', [
+            'id' => $invitation->user_id,
+            'status' => UserStatus::Invited->value,
+            'password' => null,
+        ]);
+        $this->assertDatabaseHas('invitations', [
+            'id' => $invitation->id,
+            'status' => InvitationStatus::Pending->value,
+            'accepted_at' => null,
+        ]);
+        $this->assertGuest();
+    }
+
+    public function test_store_rejects_missing_password_confirmation_as_json(): void
+    {
+        $invitation = $this->freshInvitation();
+
+        $response = $this->postJson($this->postUrl($invitation), [
+            'name' => '受講太郎',
+            'password' => 'secret-pass',
+        ]);
+
+        $response->assertUnprocessable()->assertJsonValidationErrors('password');
+        $this->assertDatabaseHas('users', [
+            'id' => $invitation->user_id,
+            'status' => UserStatus::Invited->value,
+            'password' => null,
+        ]);
+        $this->assertDatabaseHas('invitations', [
+            'id' => $invitation->id,
+            'status' => InvitationStatus::Pending->value,
+            'accepted_at' => null,
+        ]);
+        $this->assertGuest();
     }
 
     public function test_store_requires_meeting_url_for_coach_invitation(): void
