@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Http\Dashboard;
 
+use App\Enums\ContentStatus;
 use App\Models\Certificate;
 use App\Models\Certification;
 use App\Models\Chapter;
@@ -14,7 +15,9 @@ use App\Models\Plan;
 use App\Models\Section;
 use App\Models\User;
 use App\Services\EnrollmentStatsService;
+use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Str;
 use Mockery;
 use Tests\TestCase;
 
@@ -47,6 +50,46 @@ class DashboardControllerTest extends TestCase
 
         $response->assertOk();
         $response->assertViewIs('dashboard.coach');
+    }
+
+    public function test_coach_dashboard_renders_assigned_student_details_and_last_activity_states(): void
+    {
+        $this->travelTo(Carbon::parse('2026-10-16 12:00:00'));
+        $coach = User::factory()->coach()->inProgress()->create();
+        $admin = User::factory()->admin()->inProgress()->create();
+        $certification = Certification::factory()->published()->create(['name' => '担当資格テスト']);
+        $certification->coaches()->attach($coach->id, [
+            'id' => (string) Str::ulid(),
+            'assigned_by_user_id' => $admin->id,
+            'assigned_at' => now(),
+            'unassigned_at' => null,
+        ]);
+        $studentWithActivity = User::factory()->student()->inProgress()->create(['name' => '活動あり受講生']);
+        $studentWithoutActivity = User::factory()->student()->inProgress()->create(['name' => '活動なし受講生']);
+        $activeEnrollment = Enrollment::factory()->for($studentWithActivity)->for($certification)->learning()->create();
+        $inactiveEnrollment = Enrollment::factory()->for($studentWithoutActivity)->for($certification)->passed()->create([
+            'passed_at' => now()->subDay(),
+        ]);
+        $part = Part::factory()->for($certification)->create(['status' => ContentStatus::Published->value]);
+        $chapter = Chapter::factory()->for($part)->create(['status' => ContentStatus::Published->value]);
+        $section = Section::factory()->for($chapter)->create(['status' => ContentStatus::Published->value]);
+        $activityAt = now()->subMinutes(5);
+        LearningSession::factory()->forEnrollment($activeEnrollment)->forSection($section)->create([
+            'started_at' => $activityAt,
+        ]);
+
+        $response = $this->actingAs($coach)->get(route('dashboard.index'));
+
+        $response->assertOk();
+        $response->assertSee('活動あり受講生');
+        $response->assertSee('活動なし受講生');
+        $response->assertSee('担当資格テスト');
+        $response->assertSee($activeEnrollment->current_term->label());
+        $response->assertSee($activeEnrollment->status->label());
+        $response->assertSee($inactiveEnrollment->status->label());
+        $response->assertSee('最終活動');
+        $response->assertSee($activityAt->diffForHumans());
+        $response->assertSee('記録なし');
     }
 
     public function test_student_user_sees_student_dashboard_blade(): void
