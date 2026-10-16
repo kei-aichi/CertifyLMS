@@ -4,18 +4,25 @@ declare(strict_types=1);
 
 namespace Tests\Feature\UseCases\Dashboard;
 
+use App\Enums\ContentStatus;
 use App\Enums\EnrollmentStatus;
 use App\Enums\MeetingStatus;
 use App\Models\Certification;
+use App\Models\Chapter;
 use App\Models\ChatMember;
 use App\Models\ChatMessage;
 use App\Models\ChatRoom;
 use App\Models\Enrollment;
 use App\Models\LearningSession;
 use App\Models\Meeting;
+use App\Models\Part;
+use App\Models\Section;
+use App\Models\SectionQuestion;
+use App\Models\SectionQuestionAnswer;
 use App\Models\User;
 use App\Services\ChatUnreadCountService;
 use App\UseCases\Dashboard\FetchCoachDashboardAction;
+use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Mockery;
@@ -59,6 +66,96 @@ class FetchCoachDashboardActionTest extends TestCase
 
         $first = $vm->assignedEnrollments->first();
         $this->assertNotNull($first->last_activity_at);
+        $this->assertTrue(Carbon::parse((string) $first->last_activity_at)->equalTo(
+            Carbon::parse((string) LearningSession::query()->where('enrollment_id', $enrollment->id)->value('started_at')),
+        ));
+    }
+
+    public function test_last_activity_at_is_the_latest_started_at_across_sessions(): void
+    {
+        [$coach, , $enrollment] = $this->createAssignedEnrollment();
+        $earlier = Carbon::parse('2026-01-01 10:00:00');
+        $latest = Carbon::parse('2026-01-03 15:00:00');
+
+        LearningSession::factory()->forEnrollment($enrollment)->startedOn($earlier)->create([
+            'ended_at' => $earlier->copy()->addMinutes(5),
+        ]);
+        LearningSession::factory()->forEnrollment($enrollment)->startedOn($latest)->create([
+            'ended_at' => $latest->copy()->addMinutes(5),
+        ]);
+
+        $result = app(FetchCoachDashboardAction::class)($coach)->assignedEnrollments->first();
+
+        $this->assertTrue(Carbon::parse((string) $result->last_activity_at)->equalTo($latest));
+    }
+
+    public function test_last_activity_at_uses_started_at_when_it_differs_from_ended_at(): void
+    {
+        [$coach, , $enrollment] = $this->createAssignedEnrollment();
+        $startedAt = Carbon::parse('2026-02-01 09:00:00');
+        $endedAt = Carbon::parse('2026-02-01 18:00:00');
+
+        LearningSession::factory()->forEnrollment($enrollment)->create([
+            'started_at' => $startedAt,
+            'ended_at' => $endedAt,
+        ]);
+
+        $result = app(FetchCoachDashboardAction::class)($coach)->assignedEnrollments->first();
+
+        $this->assertTrue(Carbon::parse((string) $result->last_activity_at)->equalTo($startedAt));
+    }
+
+    public function test_open_session_with_null_ended_at_is_included_in_last_activity_at(): void
+    {
+        [$coach, , $enrollment] = $this->createAssignedEnrollment();
+        $startedAt = Carbon::parse('2026-03-01 11:00:00');
+
+        LearningSession::factory()->forEnrollment($enrollment)->open()->create([
+            'started_at' => $startedAt,
+            'ended_at' => null,
+        ]);
+
+        $result = app(FetchCoachDashboardAction::class)($coach)->assignedEnrollments->first();
+
+        $this->assertTrue(Carbon::parse((string) $result->last_activity_at)->equalTo($startedAt));
+    }
+
+    public function test_last_activity_at_is_null_when_enrollment_has_no_sessions(): void
+    {
+        [$coach, , $enrollment] = $this->createAssignedEnrollment();
+
+        $result = app(FetchCoachDashboardAction::class)($coach)->assignedEnrollments->first();
+
+        $this->assertNull($result->last_activity_at);
+    }
+
+    public function test_exercise_answer_time_is_not_used_for_last_activity_at(): void
+    {
+        [$coach, $cert, $enrollment] = $this->createAssignedEnrollment();
+        [$part, $chapter, $section] = $this->createContentChain($cert);
+        $question = SectionQuestion::factory()->forSection($section)->create();
+        $startedAt = Carbon::parse('2026-04-01 09:00:00');
+        $answeredAt = Carbon::parse('2026-04-02 09:00:00');
+
+        LearningSession::factory()->forEnrollment($enrollment)->forSection($section)->create([
+            'started_at' => $startedAt,
+            'ended_at' => $startedAt->copy()->addMinutes(10),
+        ]);
+        SectionQuestionAnswer::factory()->forUser($enrollment->user)->forQuestion($question)->answeredOn($answeredAt)->create();
+
+        $result = app(FetchCoachDashboardAction::class)($coach)->assignedEnrollments->first();
+
+        $this->assertTrue(Carbon::parse((string) $result->last_activity_at)->equalTo($startedAt));
+    }
+
+    public function test_assigned_enrollments_eager_load_user_and_certification(): void
+    {
+        [$coach] = $this->createAssignedEnrollment();
+
+        $result = app(FetchCoachDashboardAction::class)($coach)->assignedEnrollments->first();
+
+        $this->assertTrue($result->relationLoaded('user'));
+        $this->assertTrue($result->relationLoaded('certification'));
     }
 
     public function test_only_passed_and_learning_enrollments_are_displayed(): void
@@ -175,6 +272,31 @@ class FetchCoachDashboardActionTest extends TestCase
         $this->assertSame(1, $vm->unreadChatCount);
         $this->assertCount(1, $vm->recentUnreadChatRooms);
         $this->assertSame($unreadRoom->id, $vm->recentUnreadChatRooms->first()->id);
+    }
+
+    /**
+     * @return array{0: User, 1: Certification, 2: Enrollment}
+     */
+    private function createAssignedEnrollment(): array
+    {
+        $coach = User::factory()->coach()->inProgress()->create();
+        $certification = Certification::factory()->published()->create();
+        $this->attachCoach($certification, $coach);
+        $enrollment = Enrollment::factory()->for($certification)->learning()->create();
+
+        return [$coach, $certification, $enrollment];
+    }
+
+    /**
+     * @return array{0: Part, 1: Chapter, 2: Section}
+     */
+    private function createContentChain(Certification $certification): array
+    {
+        $part = Part::factory()->for($certification)->create(['status' => ContentStatus::Published->value]);
+        $chapter = Chapter::factory()->for($part)->create(['status' => ContentStatus::Published->value]);
+        $section = Section::factory()->for($chapter)->create(['status' => ContentStatus::Published->value]);
+
+        return [$part, $chapter, $section];
     }
 
     private function attachCoach(Certification $certification, User $coach): void
