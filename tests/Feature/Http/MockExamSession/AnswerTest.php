@@ -16,6 +16,18 @@ class AnswerTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_graduated_student_cannot_update_session_answers(): void
+    {
+        $student = User::factory()->student()->graduated()->create();
+        $session = MockExamSession::factory()->forUser($student)->inProgress()->create();
+
+        $this->actingAs($student)
+            ->patch(route('mock-exam-sessions.answers.update', $session), ['question_id' => 'blocked', 'option_id' => 'blocked'])
+            ->assertForbidden();
+
+        $this->assertDatabaseCount('mock_exam_answers', 0);
+    }
+
     public function test_patch_saves_answer_upsert(): void
     {
         [$student, $session, $question] = $this->makeSessionWithQuestion();

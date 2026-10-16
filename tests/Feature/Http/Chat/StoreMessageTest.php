@@ -163,6 +163,24 @@ class StoreMessageTest extends TestCase
         $response->assertForbidden();
     }
 
+    public function test_graduated_student_cannot_send_message(): void
+    {
+        $student = User::factory()->student()->graduated()->create();
+        $enrollment = Enrollment::factory()->for($student)->create();
+        $room = ChatRoom::factory()->for($enrollment)->create();
+        ChatMember::factory()->create(['chat_room_id' => $room->id, 'user_id' => $student->id]);
+
+        $response = $this->actingAs($student)
+            ->post(route('chat.storeMessage', $room), ['body' => 'blocked']);
+
+        $response->assertForbidden();
+        $this->assertDatabaseMissing('chat_messages', [
+            'chat_room_id' => $room->id,
+            'sender_user_id' => $student->id,
+            'body' => 'blocked',
+        ]);
+    }
+
     public function test_admin_cannot_send_message(): void
     {
         $admin = User::factory()->admin()->inProgress()->create();

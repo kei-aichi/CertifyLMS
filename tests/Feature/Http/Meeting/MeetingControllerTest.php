@@ -126,6 +126,33 @@ class MeetingControllerTest extends TestCase
         $this->actingAs($coach)->get(route('meetings.show', $meeting))->assertOk();
     }
 
+    public function test_admin_can_view_any_meeting(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $student = User::factory()->student()->inProgress()->create();
+        $coach = User::factory()->coach()->create();
+        $meeting = Meeting::factory()->reserved()->forCoach($coach)->forStudent($student)->create();
+
+        $this->actingAs($admin)
+            ->get(route('meetings.show', $meeting))
+            ->assertOk();
+    }
+
+    public function test_non_active_student_cannot_view_or_cancel_own_meeting(): void
+    {
+        foreach (['graduated', 'invited', 'withdrawn'] as $status) {
+            $student = User::factory()->student()->create(['status' => $status]);
+            $coach = User::factory()->coach()->create();
+            $meeting = Meeting::factory()->reserved()->forCoach($coach)->forStudent($student)->create([
+                'scheduled_at' => now()->addDays(3)->startOfHour(),
+            ]);
+
+            $this->actingAs($student)->get(route('meetings.show', $meeting))->assertForbidden();
+            $this->actingAs($student)->post(route('meetings.cancel', $meeting))->assertForbidden();
+            $this->assertSame(MeetingStatus::Reserved, $meeting->fresh()->status);
+        }
+    }
+
     public function test_create_requires_enrollment_ownership(): void
     {
         $student = User::factory()->student()->inProgress()->create();
@@ -309,6 +336,35 @@ class MeetingControllerTest extends TestCase
         $response = $this->actingAs($student)->get(route('meetings.create', $enrollment));
 
         $response->assertForbidden();
+    }
+
+    public function test_graduated_student_cannot_fetch_availability(): void
+    {
+        $student = User::factory()->student()->graduated()->create();
+        $certification = Certification::factory()->published()->create();
+        $enrollment = Enrollment::factory()->for($student, 'user')->for($certification)->learning()->create();
+
+        $date = now()->startOfDay()->next(Carbon::MONDAY)->format('Y-m-d');
+        $this->actingAs($student)
+            ->getJson(route('meetings.availability', $enrollment)."?date={$date}")
+            ->assertForbidden();
+    }
+
+    public function test_graduated_student_cannot_store_meeting(): void
+    {
+        $student = User::factory()->student()->graduated()->create(['max_meetings' => 3]);
+        $certification = Certification::factory()->published()->create();
+        $enrollment = Enrollment::factory()->for($student, 'user')->for($certification)->learning()->create();
+        $scheduledAt = now()->startOfDay()->next(Carbon::MONDAY)->setTime(10, 0);
+
+        $this->actingAs($student)
+            ->post(route('meetings.store', $enrollment), [
+                'scheduled_at' => $scheduledAt->format('Y-m-d\\TH:i:s'),
+                'topic' => 'blocked',
+            ])
+            ->assertForbidden();
+
+        $this->assertDatabaseCount('meetings', 0);
     }
 
     public function test_store_blocks_double_booking_for_same_coach_and_slot(): void

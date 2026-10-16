@@ -36,7 +36,7 @@ class EnrollmentPolicyTest extends TestCase
         $this->assertFalse($policy->view($other, $enrollment), '他人の enrollment は view 不可');
     }
 
-    public function test_student_view_requires_in_progress_status(): void
+    public function test_student_view_requires_active_or_graduated_status(): void
     {
         $policy = new EnrollmentPolicy;
 
@@ -44,7 +44,7 @@ class EnrollmentPolicyTest extends TestCase
             $student = User::factory()->student()->state(['status' => $status])->create();
             $enrollment = Enrollment::factory()->for($student)->learning()->create();
 
-            $this->assertFalse($policy->view($student, $enrollment));
+            $this->assertSame($status === 'graduated', $policy->view($student, $enrollment));
         }
     }
 

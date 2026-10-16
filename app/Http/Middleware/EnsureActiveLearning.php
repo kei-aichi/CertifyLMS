@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Middleware;
 
+use App\Enums\UserStatus;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -21,8 +22,8 @@ final class EnsureActiveLearning
     {
         $user = $request->user();
 
-        if ($user === null) {
-            abort(403, 'プラン期間が満了しました。プラン機能はご利用いただけません。プロフィール / 修了証は引き続きアクセス可能です。');
+        if ($user === null || $user->status !== UserStatus::InProgress) {
+            abort(403, 'プラン機能は受講中のユーザーのみご利用いただけます。');
         }
 
         return $next($request);

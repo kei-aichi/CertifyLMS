@@ -56,6 +56,17 @@ class BrowseControllerTest extends TestCase
         $response->assertForbidden();
     }
 
+    public function test_graduated_user_with_enrollment_cannot_open_learning_content(): void
+    {
+        [$student, $part, $chapter, $section] = $this->buildContentTree(EnrollmentStatus::Learning);
+        $student->update(['status' => 'graduated']);
+
+        $this->actingAs($student->fresh())->get(route('learning.index'))->assertForbidden();
+        $this->actingAs($student->fresh())->get(route('learning.parts.show', $part))->assertForbidden();
+        $this->actingAs($student->fresh())->get(route('learning.chapters.show', $chapter))->assertForbidden();
+        $this->actingAs($student->fresh())->get(route('learning.sections.show', $section))->assertForbidden();
+    }
+
     public function test_show_enrollment_for_passed_status_is_visible(): void
     {
         $student = User::factory()->student()->inProgress()->create();

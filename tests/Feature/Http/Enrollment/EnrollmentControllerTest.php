@@ -37,6 +37,17 @@ class EnrollmentControllerTest extends TestCase
         });
     }
 
+    public function test_graduated_student_can_view_own_enrollments(): void
+    {
+        $student = User::factory()->student()->graduated()->create();
+        $enrollment = Enrollment::factory()->for($student)->create();
+
+        $this->actingAs($student)
+            ->get(route('enrollments.index'))
+            ->assertOk()
+            ->assertViewHas('enrollments', fn ($enrollments) => $enrollments->pluck('id')->contains($enrollment->id));
+    }
+
     public function test_show_allows_owner_student(): void
     {
         $student = User::factory()->student()->inProgress()->create();
@@ -58,11 +69,11 @@ class EnrollmentControllerTest extends TestCase
         $response->assertForbidden();
     }
 
-    public function test_show_forbids_student_status_other_than_in_progress(): void
+    public function test_show_forbids_invited_and_withdrawn_student(): void
     {
         $certification = Certification::factory()->published()->create();
 
-        foreach (['invited', 'graduated', 'withdrawn'] as $status) {
+        foreach (['invited', 'withdrawn'] as $status) {
             $student = User::factory()->student()->state(['status' => $status])->create();
             $enrollment = Enrollment::factory()->for($student)->for($certification)->learning()->create();
 
@@ -70,6 +81,27 @@ class EnrollmentControllerTest extends TestCase
                 ->get(route('enrollments.show', $enrollment))
                 ->assertForbidden();
         }
+    }
+
+    public function test_graduated_student_can_view_own_enrollment(): void
+    {
+        $student = User::factory()->student()->graduated()->create();
+        $enrollment = Enrollment::factory()->for($student)->create();
+
+        $this->actingAs($student)
+            ->get(route('enrollments.show', $enrollment))
+            ->assertOk()
+            ->assertViewIs('enrollment.show');
+    }
+
+    public function test_graduated_student_cannot_view_learning_enrollment_page(): void
+    {
+        $student = User::factory()->student()->graduated()->create();
+        Enrollment::factory()->for($student)->learning()->create();
+
+        $this->actingAs($student)
+            ->get(route('learning.index'))
+            ->assertForbidden();
     }
 
     public function test_store_creates_enrollment_for_published_certification(): void
