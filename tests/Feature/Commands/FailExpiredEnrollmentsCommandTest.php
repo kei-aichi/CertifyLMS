@@ -6,6 +6,7 @@ namespace Tests\Feature\Commands;
 
 use App\Enums\EnrollmentStatus;
 use App\Models\Enrollment;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -61,5 +62,23 @@ class FailExpiredEnrollmentsCommandTest extends TestCase
             'changed_by_user_id' => null,
             'changed_reason' => '試験日超過による自動失敗',
         ]);
+    }
+
+    public function test_expired_default_enrollment_is_reassigned_to_only_remaining_active_enrollment(): void
+    {
+        $user = User::factory()->student()->create();
+        $expired = Enrollment::factory()->for($user)->learning()->create([
+            'exam_date' => now()->subDay()->toDateString(),
+        ]);
+        $remaining = Enrollment::factory()->for($user)->learning()->create([
+            'exam_date' => now()->addDay()->toDateString(),
+        ]);
+        $user->update(['default_enrollment_id' => $expired->id]);
+
+        $this->artisan('enrollments:fail-expired')->assertExitCode(0);
+
+        $this->assertSame(EnrollmentStatus::Failed, $expired->fresh()->status);
+        $this->assertSame(EnrollmentStatus::Learning, $remaining->fresh()->status);
+        $this->assertSame($remaining->id, $user->fresh()->default_enrollment_id);
     }
 }
