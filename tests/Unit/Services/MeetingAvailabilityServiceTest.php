@@ -122,4 +122,23 @@ class MeetingAvailabilityServiceTest extends TestCase
         app(MeetingAvailabilityService::class)->validateSlot($certification, Carbon::parse('2026-06-01 09:00:00'));
         $this->addToAssertionCount(1);
     }
+
+    public function test_validate_slot_does_not_treat_an_occupied_slot_as_outside_availability(): void
+    {
+        $certification = Certification::factory()->published()->create();
+        $coach = User::factory()->coach()->create();
+        $student = User::factory()->student()->create();
+        $this->attachCoach($certification, $coach);
+        CoachAvailability::factory()->forCoach($coach)->onDay(1)->timeRange('09:00:00', '12:00:00')->create();
+        Meeting::factory()->reserved()->forCoach($coach)->forStudent($student)->create([
+            'scheduled_at' => Carbon::parse('2026-06-01 10:00:00'),
+        ]);
+
+        app(MeetingAvailabilityService::class)->validateSlot(
+            $certification,
+            Carbon::parse('2026-06-01 10:00:00'),
+        );
+
+        $this->addToAssertionCount(1);
+    }
 }

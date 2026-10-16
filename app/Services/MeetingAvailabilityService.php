@@ -99,11 +99,19 @@ final class MeetingAvailabilityService
      */
     public function validateSlot(Certification $certification, Carbon $scheduledAt): void
     {
-        $slots = $this->slotsForCertification($certification, $scheduledAt->copy()->startOfDay());
+        $coachIds = $certification->coaches()->pluck('users.id');
+        $time = $scheduledAt->format('H:i:s');
 
-        $matched = $slots->contains(
-            fn (array $slot) => $slot['slot_start']->equalTo($scheduledAt) && $slot['available_coach_count'] > 0,
-        );
+        // ここでは「対応可能時間枠の存在」だけを検証する。
+        // 予約済みMeetingによる満席判定は、予約処理側で候補コーチ行を
+        // ロックした後に再確認し、409 (Conflict) として扱う。
+        $matched = CoachAvailability::query()
+            ->whereIn('coach_id', $coachIds)
+            ->where('day_of_week', $scheduledAt->dayOfWeek)
+            ->where('is_active', true)
+            ->where('start_time', '<=', $time)
+            ->where('end_time', '>', $time)
+            ->exists();
 
         if (! $matched) {
             throw new MeetingOutOfAvailabilityException;
