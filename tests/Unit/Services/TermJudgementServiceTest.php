@@ -120,6 +120,34 @@ class TermJudgementServiceTest extends TestCase
         $this->assertSame(TermType::MockPractice, $enrollment->refresh()->current_term);
     }
 
+    public function test_returns_mock_practice_when_canceled_and_submitted_sessions_are_mixed(): void
+    {
+        $enrollment = Enrollment::factory()->create(['current_term' => TermType::BasicLearning->value]);
+        $exam = MockExam::factory()->for($enrollment->certification)->count(2)->create();
+
+        MockExamSession::factory()->for($enrollment)->for($exam[0])->create(['status' => 'canceled']);
+        MockExamSession::factory()->for($enrollment)->for($exam[1])->create(['status' => 'submitted']);
+
+        $term = $this->service->recalculate($enrollment);
+
+        $this->assertSame(TermType::MockPractice, $term);
+        $this->assertSame(TermType::MockPractice, $enrollment->refresh()->current_term);
+    }
+
+    public function test_returns_mock_practice_when_canceled_and_graded_sessions_are_mixed(): void
+    {
+        $enrollment = Enrollment::factory()->create(['current_term' => TermType::BasicLearning->value]);
+        $exam = MockExam::factory()->for($enrollment->certification)->count(2)->create();
+
+        MockExamSession::factory()->for($enrollment)->for($exam[0])->create(['status' => 'canceled']);
+        MockExamSession::factory()->for($enrollment)->for($exam[1])->create(['status' => 'graded']);
+
+        $term = $this->service->recalculate($enrollment);
+
+        $this->assertSame(TermType::MockPractice, $term);
+        $this->assertSame(TermType::MockPractice, $enrollment->refresh()->current_term);
+    }
+
     public function test_does_not_include_sessions_from_another_enrollment_of_same_student(): void
     {
         $student = User::factory()->student()->create();
