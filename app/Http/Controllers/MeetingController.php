@@ -32,7 +32,6 @@ use App\Services\MeetingQuotaService;
 use App\UseCases\MeetingQuota\ConsumeQuotaAction;
 use App\UseCases\MeetingQuota\RefundQuotaAction;
 use Carbon\Carbon;
-use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Collection;
@@ -164,7 +163,7 @@ class MeetingController extends Controller
 
     /**
      * 受講生の予約申請。残面談回数を確認し、空き枠から過去実績最少のコーチを自動割当して reserved で確定する。
-     * 同時刻 race condition は (coach_id, scheduled_at) UNIQUE 違反として検知し 409 へ変換する。
+     * 同時刻の競合は候補コーチUser行をロックし、ロック後の空き状況再確認で409へ変換する。
      */
     public function store(
         Enrollment $enrollment,
@@ -194,27 +193,48 @@ class MeetingController extends Controller
 
             $availabilityService->validateSlot($enrollment->certification, $scheduledAt);
 
-            $candidates = $this->findAvailableCoaches($enrollment->certification, $scheduledAt);
-            if ($candidates->isEmpty()) {
+            $candidateIds = $this->findAvailableCoaches($enrollment->certification, $scheduledAt)
+                ->pluck('id')
+                ->sort()
+                ->values();
+
+            if ($candidateIds->isEmpty()) {
                 throw new MeetingNoAvailableCoachException;
             }
 
-            $coach = $coachLoadService->leastLoadedCoach($candidates);
+            // 全リクエストでコーチID昇順にUser行をロックし、候補判定を直列化する。
+            // ロック取得後のMeeting確認は lockForUpdate() による current read とする。
+            $lockedCandidates = $candidateIds->map(function (string $coachId): User {
+                return User::query()
+                    ->whereKey($coachId)
+                    ->lockForUpdate()
+                    ->firstOrFail();
+            });
 
-            try {
-                $meeting = Meeting::create([
-                    'enrollment_id' => $enrollment->id,
-                    'coach_id' => $coach->id,
-                    'student_id' => $student->id,
-                    'scheduled_at' => $scheduledAt,
-                    'status' => MeetingStatus::Reserved->value,
-                    'topic' => $topic,
-                    'meeting_url_snapshot' => $coach->meeting_url,
-                ]);
-            } catch (UniqueConstraintViolationException $e) {
-                // 同時刻に他受講生が先行予約した race condition: UNIQUE(coach_id, scheduled_at) で弾かれた
-                throw new MeetingNoAvailableCoachException($e);
+            $availableCandidates = $lockedCandidates->filter(function (User $coach) use ($scheduledAt): bool {
+                return ! Meeting::query()
+                    ->where('coach_id', $coach->id)
+                    ->where('scheduled_at', $scheduledAt)
+                    ->whereIn('status', [MeetingStatus::Reserved->value, MeetingStatus::Completed->value])
+                    ->lockForUpdate()
+                    ->exists();
+            })->values();
+
+            if ($availableCandidates->isEmpty()) {
+                throw new MeetingNoAvailableCoachException;
             }
+
+            $coach = $coachLoadService->leastLoadedCoach($availableCandidates);
+
+            $meeting = Meeting::create([
+                'enrollment_id' => $enrollment->id,
+                'coach_id' => $coach->id,
+                'student_id' => $student->id,
+                'scheduled_at' => $scheduledAt,
+                'status' => MeetingStatus::Reserved->value,
+                'topic' => $topic,
+                'meeting_url_snapshot' => $coach->meeting_url,
+            ]);
 
             $transaction = ($consumeAction)($student, $meeting->id);
             $meeting->update(['meeting_quota_transaction_id' => $transaction->id]);
@@ -247,12 +267,26 @@ class MeetingController extends Controller
         $this->authorize('cancel', $meeting);
 
         $actor = auth()->user();
+        $coachId = $meeting->coach_id;
 
-        DB::transaction(function () use ($meeting, $actor, $refundAction) {
+        DB::transaction(function () use ($meeting, $actor, $refundAction, $coachId) {
+            // 予約処理と同じ順序で、コーチUser行を先にロックする。
+            User::query()
+                ->whereKey($coachId)
+                ->lockForUpdate()
+                ->firstOrFail();
+
             $locked = Meeting::query()->whereKey($meeting->id)->lockForUpdate()->first();
-            if ($locked === null || $locked->status !== MeetingStatus::Reserved) {
+            if (
+                $locked === null
+                || $locked->coach_id !== $coachId
+                || $locked->status !== MeetingStatus::Reserved
+            ) {
                 throw MeetingStatusTransitionException::forCancel();
             }
+
+            // Route Model Binding直後の認可結果だけに依存せず、ロック後の最新状態で再確認する。
+            $this->authorize('cancel', $locked);
 
             if ($locked->scheduled_at->lessThanOrEqualTo(now())) {
                 throw new MeetingAlreadyStartedException;

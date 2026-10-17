@@ -367,11 +367,9 @@ class MeetingControllerTest extends TestCase
         $this->assertDatabaseCount('meetings', 0);
     }
 
-    public function test_store_blocks_double_booking_for_same_coach_and_slot(): void
+    public function test_store_allows_rebooking_after_canceled_meeting_and_preserves_history(): void
     {
-        // Arrange: 予約可能コンテキスト + 同コーチ・同時刻に canceled 面談を 1 件先在させる。
-        // canceled は候補抽出(予約済コーチ除外)をすり抜けるが、(coach_id, scheduled_at) UNIQUE は
-        // status を問わず効くため、並行を起こさず決定論的に二重予約の衝突を再現できる。
+        // Arrange: canceled は履歴として残るが、予約枠を占有しない。
         $student = User::factory()->student()->inProgress()->create(['max_meetings' => 3]);
         $otherStudent = User::factory()->student()->create();
         $admin = User::factory()->admin()->create();
@@ -396,14 +394,130 @@ class MeetingControllerTest extends TestCase
                 'topic' => '相談したい',
             ]);
 
-        // Assert: 二重予約は成立せず、新規 reserved は作られない(canceled の 1 件のみが残る)
+        // Assert: canceled 履歴を残したまま、新しい reserved を作成できる。
         $response->assertRedirect();
-        $response->assertSessionHas('error');
-        $this->assertSame(
-            0,
-            Meeting::query()->where('status', MeetingStatus::Reserved->value)->count(),
-            '同コーチ・同時刻の二重予約は (coach_id, scheduled_at) UNIQUE で阻止されるはず',
-        );
+        $response->assertSessionHas('success');
+        $this->assertDatabaseHas('meetings', [
+            'coach_id' => $coach->id,
+            'scheduled_at' => $scheduledAt,
+            'status' => MeetingStatus::Canceled->value,
+        ]);
+        $this->assertSame(1, Meeting::query()
+            ->where('coach_id', $coach->id)
+            ->where('scheduled_at', $scheduledAt)
+            ->where('status', MeetingStatus::Reserved->value)
+            ->count());
+        $this->assertSame(2, Meeting::query()
+            ->where('coach_id', $coach->id)
+            ->where('scheduled_at', $scheduledAt)
+            ->count());
+    }
+
+    public function test_store_blocks_reserved_meeting_with_conflict(): void
+    {
+        $student = User::factory()->student()->inProgress()->create(['max_meetings' => 3]);
+        $otherStudent = User::factory()->student()->inProgress()->create(['max_meetings' => 3]);
+        $admin = User::factory()->admin()->create();
+        $coach = User::factory()->coach()->inProgress()->create();
+        $certification = Certification::factory()->published()->create();
+        $this->attachCoach($certification, $coach, $admin);
+        CoachAvailability::factory()->forCoach($coach)->onDay(1)->timeRange('09:00:00', '18:00:00')->create();
+        $enrollment = Enrollment::factory()->for($student, 'user')->for($certification)->learning()->create();
+        $scheduledAt = now()->startOfDay()->next(Carbon::MONDAY)->setTime(10, 0);
+        Meeting::factory()->reserved()->forCoach($coach)->forStudent($otherStudent)->create([
+            'scheduled_at' => $scheduledAt,
+        ]);
+
+        $response = $this->actingAs($student)
+            ->from(route('meetings.create', $enrollment))
+            ->post(route('meetings.store', $enrollment), [
+                'scheduled_at' => $scheduledAt->format('Y-m-d\\TH:i:s'),
+                'topic' => 'occupied',
+            ]);
+
+        $response->assertRedirect()->assertSessionHas('error');
+        $this->assertSame(1, Meeting::query()->where('status', MeetingStatus::Reserved->value)->count());
+        $this->assertSame(3, app(MeetingQuotaService::class)->remaining($student));
+        $this->assertDatabaseCount('meeting_quota_transactions', 0);
+        $this->assertDatabaseCount('notifications', 0);
+    }
+
+    public function test_store_returns_json_409_when_all_coaches_are_occupied(): void
+    {
+        $student = User::factory()->student()->inProgress()->create(['max_meetings' => 3]);
+        $otherStudent = User::factory()->student()->inProgress()->create(['max_meetings' => 3]);
+        $admin = User::factory()->admin()->create();
+        $coach = User::factory()->coach()->inProgress()->create();
+        $certification = Certification::factory()->published()->create();
+        $this->attachCoach($certification, $coach, $admin);
+        CoachAvailability::factory()->forCoach($coach)->onDay(1)->timeRange('09:00:00', '18:00:00')->create();
+        $enrollment = Enrollment::factory()->for($student, 'user')->for($certification)->learning()->create();
+        $scheduledAt = now()->startOfDay()->next(Carbon::MONDAY)->setTime(10, 0);
+        Meeting::factory()->reserved()->forCoach($coach)->forStudent($otherStudent)->create([
+            'scheduled_at' => $scheduledAt,
+        ]);
+
+        $response = $this->actingAs($student)->postJson(route('meetings.store', $enrollment), [
+            'scheduled_at' => $scheduledAt->format('Y-m-d\\TH:i:s'),
+            'topic' => 'occupied-json',
+        ]);
+
+        $response->assertStatus(409)->assertJsonFragment([
+            'message' => '指定された時刻には空きコーチがいません。別の時刻をお選びください。',
+        ]);
+    }
+
+    public function test_store_returns_json_422_when_outside_availability(): void
+    {
+        $student = User::factory()->student()->inProgress()->create(['max_meetings' => 3]);
+        $admin = User::factory()->admin()->create();
+        $coach = User::factory()->coach()->inProgress()->create();
+        $certification = Certification::factory()->published()->create();
+        $this->attachCoach($certification, $coach, $admin);
+        CoachAvailability::factory()->forCoach($coach)->onDay(1)->timeRange('09:00:00', '10:00:00')->create();
+        $enrollment = Enrollment::factory()->for($student, 'user')->for($certification)->learning()->create();
+        $scheduledAt = now()->startOfDay()->next(Carbon::MONDAY)->setTime(15, 0);
+
+        $response = $this->actingAs($student)->postJson(route('meetings.store', $enrollment), [
+            'scheduled_at' => $scheduledAt->format('Y-m-d\\TH:i:s'),
+            'topic' => 'outside',
+        ]);
+
+        $response->assertStatus(422)->assertJsonFragment([
+            'message' => '指定された時刻は面談可能時間外です。別の時刻をお選びください。',
+        ]);
+    }
+
+    public function test_store_assigns_another_available_coach_when_one_is_occupied(): void
+    {
+        $student = User::factory()->student()->inProgress()->create(['max_meetings' => 3]);
+        $otherStudent = User::factory()->student()->inProgress()->create(['max_meetings' => 3]);
+        $admin = User::factory()->admin()->create();
+        $occupiedCoach = User::factory()->coach()->inProgress()->create();
+        $availableCoach = User::factory()->coach()->inProgress()->create();
+        $certification = Certification::factory()->published()->create();
+        $this->attachCoach($certification, $occupiedCoach, $admin);
+        $this->attachCoach($certification, $availableCoach, $admin);
+        $scheduledAt = now()->startOfDay()->next(Carbon::MONDAY)->setTime(10, 0);
+        CoachAvailability::factory()->forCoach($occupiedCoach)->onDay(1)->timeRange('09:00:00', '18:00:00')->create();
+        CoachAvailability::factory()->forCoach($availableCoach)->onDay(1)->timeRange('09:00:00', '18:00:00')->create();
+        $enrollment = Enrollment::factory()->for($student, 'user')->for($certification)->learning()->create();
+        Meeting::factory()->reserved()->forCoach($occupiedCoach)->forStudent($otherStudent)->create([
+            'scheduled_at' => $scheduledAt,
+        ]);
+
+        $response = $this->actingAs($student)->post(route('meetings.store', $enrollment), [
+            'scheduled_at' => $scheduledAt->format('Y-m-d\\TH:i:s'),
+            'topic' => '再割当',
+        ]);
+
+        $response->assertRedirect();
+        $this->assertDatabaseHas('meetings', [
+            'student_id' => $student->id,
+            'coach_id' => $availableCoach->id,
+            'scheduled_at' => $scheduledAt,
+            'status' => MeetingStatus::Reserved->value,
+        ]);
     }
 
     public function test_store_allows_reservation_with_null_coach_meeting_url_and_snapshots_null(): void
