@@ -6,6 +6,7 @@ namespace App\Services;
 
 use App\Models\GoogleCredential;
 use App\Models\Meeting;
+use Carbon\Carbon;
 use Google\Client;
 use Google\Service\Calendar;
 use Google\Service\Calendar\Event;
@@ -13,7 +14,6 @@ use Google\Service\Calendar\EventDateTime;
 use Google\Service\Calendar\FreeBusyRequest;
 use Google\Service\Calendar\FreeBusyRequestItem;
 use Google\Service\Exception as GoogleServiceException;
-use Illuminate\Support\Carbon;
 use RuntimeException;
 
 class GoogleCalendarService

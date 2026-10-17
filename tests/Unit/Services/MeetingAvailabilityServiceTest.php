@@ -7,12 +7,15 @@ namespace Tests\Unit\Services;
 use App\Exceptions\Mentoring\MeetingOutOfAvailabilityException;
 use App\Models\Certification;
 use App\Models\CoachAvailability;
+use App\Models\GoogleCredential;
 use App\Models\Meeting;
 use App\Models\User;
+use App\Services\GoogleCalendarService;
 use App\Services\MeetingAvailabilityService;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
+use Mockery;
 use Tests\TestCase;
 
 class MeetingAvailabilityServiceTest extends TestCase
@@ -96,6 +99,51 @@ class MeetingAvailabilityServiceTest extends TestCase
 
         $this->assertCount(1, $slots);
         $this->assertSame(2, $slots->first()['available_coach_count']);
+    }
+
+    public function test_google_busy_overlap_excludes_connected_coach_while_unconnected_coach_remains(): void
+    {
+        $certification = Certification::factory()->published()->create();
+        $connected = User::factory()->coach()->create();
+        $unconnected = User::factory()->coach()->create();
+        $this->attachCoach($certification, $connected);
+        $this->attachCoach($certification, $unconnected);
+        GoogleCredential::factory()->create(['coach_id' => $connected->id]);
+        CoachAvailability::factory()->forCoach($connected)->onDay(1)->timeRange('09:00:00', '11:00:00')->create();
+        CoachAvailability::factory()->forCoach($unconnected)->onDay(1)->timeRange('09:00:00', '11:00:00')->create();
+        $google = Mockery::mock(GoogleCalendarService::class);
+        $google->shouldReceive('freeBusy')->once()->andReturn([[
+            'start' => Carbon::parse('2026-06-01 09:00:00', 'Asia/Tokyo'),
+            'end' => Carbon::parse('2026-06-01 10:00:00', 'Asia/Tokyo'),
+        ]]);
+        $this->app->instance(GoogleCalendarService::class, $google);
+
+        $slots = app(MeetingAvailabilityService::class)->slotsForCertification(
+            $certification,
+            Carbon::parse('2026-06-01', 'Asia/Tokyo'),
+        );
+
+        $this->assertSame(['09:00', '10:00'], $slots->pluck('slot_start')->map->format('H:i')->all());
+        $this->assertSame([1, 2], $slots->pluck('available_coach_count')->all());
+    }
+
+    public function test_google_free_busy_failure_falls_back_to_lms_slots(): void
+    {
+        $certification = Certification::factory()->published()->create();
+        $coach = User::factory()->coach()->create();
+        $this->attachCoach($certification, $coach);
+        GoogleCredential::factory()->create(['coach_id' => $coach->id]);
+        CoachAvailability::factory()->forCoach($coach)->onDay(1)->timeRange('09:00:00', '11:00:00')->create();
+        $google = Mockery::mock(GoogleCalendarService::class);
+        $google->shouldReceive('freeBusy')->once()->andThrow(new \RuntimeException('safe failure'));
+        $this->app->instance(GoogleCalendarService::class, $google);
+
+        $slots = app(MeetingAvailabilityService::class)->slotsForCertification(
+            $certification,
+            Carbon::parse('2026-06-01', 'Asia/Tokyo'),
+        );
+
+        $this->assertCount(2, $slots);
     }
 
     public function test_validate_slot_throws_when_outside_availability(): void
