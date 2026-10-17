@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\UseCases\MockExamSession;
 
 use App\Enums\MockExamSessionStatus;
+use App\Exceptions\MockExam\MockExamHasNoQuestionsException;
 use App\Models\MockExamAnswer;
 use App\Models\MockExamQuestionOption;
 use App\Models\MockExamSession;
@@ -19,6 +20,11 @@ final class GradeAction
 {
     public function __invoke(MockExamSession $session): void
     {
+        $totalQuestions = $session->total_questions;
+        if ($totalQuestions <= 0) {
+            throw new MockExamHasNoQuestionsException;
+        }
+
         $answers = MockExamAnswer::query()
             ->where('mock_exam_session_id', $session->id)
             ->get();
@@ -49,10 +55,10 @@ final class GradeAction
             }
         }
 
-        $totalQuestions = $session->total_questions;
-        $scorePercentage = $totalQuestions > 0
-            ? round($totalCorrect / $totalQuestions, 2)
-            : 0.0;
+        $scorePercentage = round(
+            ($totalCorrect / $totalQuestions) * 100,
+            2,
+        );
         $pass = $scorePercentage >= (float) $session->passing_score_snapshot;
 
         $session->update([

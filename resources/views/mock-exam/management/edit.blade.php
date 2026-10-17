@@ -61,6 +61,7 @@
                     type="number"
                     :value="old('passing_score', $mockExam->passing_score)"
                     :error="$errors->first('passing_score')"
+                    hint="0〜100 の整数。受講生がこの百分率以上で合格"
                     :required="true"
                 />
             </div>

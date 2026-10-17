@@ -73,7 +73,6 @@ class UpdateRequestTest extends TestCase
             'description 2001 文字で エラー' => ['description', str_repeat('b', 2001)],
             'order 負数で エラー' => ['order', -1],
             'order 65536 で エラー' => ['order', 65536],
-            'passing_score 0 で エラー' => ['passing_score', 0],
             'passing_score 負数で エラー' => ['passing_score', -1],
             'passing_score 101 で エラー' => ['passing_score', 101],
             'passing_score 150 で エラー' => ['passing_score', 150],
@@ -89,6 +88,7 @@ class UpdateRequestTest extends TestCase
     public static function validPassingScores(): array
     {
         return [
+            'passing_score 0' => [0],
             'passing_score 1' => [1],
             'passing_score 100' => [100],
         ];
