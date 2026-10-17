@@ -7,6 +7,7 @@ namespace App\Services;
 use App\Models\GoogleCredential;
 use Google\Client;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use RuntimeException;
 
 class GoogleOAuthService
@@ -41,17 +42,24 @@ class GoogleOAuthService
             return (string) $credential->access_token;
         }
 
-        $token = $this->client()->fetchAccessTokenWithRefreshToken((string) $credential->refresh_token);
-        if (! is_array($token) || isset($token['error']) || empty($token['access_token'])) {
-            throw new RuntimeException('Google OAuth token refresh failed.');
-        }
+        return Cache::lock('google-oauth-refresh:'.$credential->getKey(), 30)->block(5, function () use ($credential): string {
+            $credential->refresh();
+            if ($credential->expires_at?->isFuture()) {
+                return (string) $credential->access_token;
+            }
 
-        $credential->forceFill([
-            'access_token' => $token['access_token'],
-            'expires_at' => Carbon::now()->addSeconds((int) ($token['expires_in'] ?? 3600)),
-        ])->save();
+            $token = $this->client()->fetchAccessTokenWithRefreshToken((string) $credential->refresh_token);
+            if (! is_array($token) || isset($token['error']) || empty($token['access_token'])) {
+                throw new RuntimeException('Google OAuth token refresh failed.');
+            }
 
-        return (string) $token['access_token'];
+            $credential->forceFill([
+                'access_token' => $token['access_token'],
+                'expires_at' => Carbon::now()->addSeconds((int) ($token['expires_in'] ?? 3600)),
+            ])->save();
+
+            return (string) $token['access_token'];
+        });
     }
 
     protected function client(): Client
