@@ -11,7 +11,7 @@ use Illuminate\Foundation\Http\FormRequest;
 /**
  * 模試マスタの新規作成リクエスト。
  *
- * `passing_score` は 1..100 の整数(百分率)。`is_published` は受け付けず、必ず draft で INSERT する。
+ * `passing_score` は 0..100 の整数(百分率)。`is_published` は受け付けず、必ず draft で INSERT する。
  */
 class StoreRequest extends FormRequest
 {
@@ -40,7 +40,7 @@ class StoreRequest extends FormRequest
             'title' => ['required', 'string', 'max:100'],
             'description' => ['nullable', 'string', 'max:2000'],
             'order' => ['required', 'integer', 'min:0', 'max:65535'],
-            'passing_score' => ['required', 'integer', 'min:1', 'max:100'],
+            'passing_score' => ['required', 'integer', 'min:0', 'max:100'],
         ];
     }
 

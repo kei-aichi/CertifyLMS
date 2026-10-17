@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\UseCases\MockExamSession;
 
 use App\Enums\MockExamSessionStatus;
+use App\Exceptions\MockExam\MockExamHasNoQuestionsException;
 use App\Models\MockExam;
 use App\Models\MockExamAnswer;
 use App\Models\MockExamQuestion;
@@ -134,5 +135,153 @@ class GradeActionTest extends TestCase
         $this->assertSame(1, $session->total_correct);
         // 1/3 = 33.33% — 50% 未満で不合格
         $this->assertFalse($session->pass);
+    }
+
+    public function test_zero_passing_score_passes_with_zero_correct_answer(): void
+    {
+        $mockExam = MockExam::factory()->published()->passingScore(0)->create();
+        $question = MockExamQuestion::factory()->forMockExam($mockExam)->withOptions(2, 0)->create();
+        $session = MockExamSession::factory()->forMockExam($mockExam)->inProgress()->create([
+            'generated_question_ids' => [$question->id],
+            'total_questions' => 1,
+            'passing_score_snapshot' => 0,
+        ]);
+
+        (app(GradeAction::class))($session);
+
+        $session->refresh();
+        $this->assertEquals(0.00, (float) $session->score_percentage);
+        $this->assertTrue($session->pass);
+    }
+
+    public function test_zero_question_session_throws_without_grading(): void
+    {
+        $mockExam = MockExam::factory()->published()->passingScore(0)->create();
+        $session = MockExamSession::factory()->forMockExam($mockExam)->inProgress()->create([
+            'total_questions' => 0,
+            'passing_score_snapshot' => 0,
+            'score_percentage' => null,
+            'pass' => null,
+        ]);
+        $question = MockExamQuestion::factory()->forMockExam($mockExam)->withOptions(2, 0)->create();
+        $correctOption = $question->options->firstWhere('is_correct', true);
+        $answer = MockExamAnswer::factory()->create([
+            'mock_exam_session_id' => $session->id,
+            'mock_exam_question_id' => $question->id,
+            'selected_option_id' => $correctOption->id,
+            'selected_option_body' => $correctOption->body,
+            'is_correct' => false,
+            'answered_at' => now(),
+        ]);
+
+        try {
+            (app(GradeAction::class))($session);
+            $this->fail('Expected MockExamHasNoQuestionsException was not thrown.');
+        } catch (MockExamHasNoQuestionsException) {
+            $session->refresh();
+            $this->assertSame(MockExamSessionStatus::InProgress, $session->status);
+            $this->assertNull($session->score_percentage);
+            $this->assertNull($session->pass);
+            $this->assertFalse($answer->fresh()->is_correct);
+        }
+    }
+
+    public function test_rounds_percentage_before_comparing_with_passing_score(): void
+    {
+        $mockExam = MockExam::factory()->published()->passingScore(16)->create();
+        $questions = collect();
+        for ($i = 0; $i < 6; $i++) {
+            $questions->push(MockExamQuestion::factory()->forMockExam($mockExam)->withOptions(2, 0)->create(['order' => $i]));
+        }
+
+        $session = MockExamSession::factory()->forMockExam($mockExam)->inProgress()->create([
+            'generated_question_ids' => $questions->pluck('id')->all(),
+            'total_questions' => 6,
+            'passing_score_snapshot' => 16,
+        ]);
+        $question = $questions->first();
+        $correctOption = $question->options->firstWhere('is_correct', true);
+        MockExamAnswer::factory()->create([
+            'mock_exam_session_id' => $session->id,
+            'mock_exam_question_id' => $question->id,
+            'selected_option_id' => $correctOption->id,
+            'selected_option_body' => $correctOption->body,
+            'is_correct' => false,
+            'answered_at' => now(),
+        ]);
+
+        (app(GradeAction::class))($session);
+
+        $session->refresh();
+        $this->assertEquals(16.67, (float) $session->score_percentage);
+        $this->assertTrue($session->pass);
+    }
+
+    public function test_four_of_five_correct_is_80_percent_and_passes(): void
+    {
+        $session = $this->createSessionWithAnswers(4, 5, 60);
+
+        (app(GradeAction::class))($session);
+
+        $session->refresh();
+        $this->assertSame(MockExamSessionStatus::Graded, $session->status);
+        $this->assertSame(4, $session->total_correct);
+        $this->assertEquals(80.00, (float) $session->score_percentage);
+        $this->assertTrue($session->pass);
+    }
+
+    public function test_five_of_five_correct_is_100_percent_and_passes(): void
+    {
+        $session = $this->createSessionWithAnswers(5, 5, 60);
+
+        (app(GradeAction::class))($session);
+
+        $session->refresh();
+        $this->assertSame(MockExamSessionStatus::Graded, $session->status);
+        $this->assertSame(5, $session->total_correct);
+        $this->assertEquals(100.00, (float) $session->score_percentage);
+        $this->assertTrue($session->pass);
+    }
+
+    public function test_zero_of_five_correct_is_zero_percent_and_fails(): void
+    {
+        $session = $this->createSessionWithAnswers(0, 5, 60);
+
+        (app(GradeAction::class))($session);
+
+        $session->refresh();
+        $this->assertSame(MockExamSessionStatus::Graded, $session->status);
+        $this->assertSame(0, $session->total_correct);
+        $this->assertEquals(0.00, (float) $session->score_percentage);
+        $this->assertFalse($session->pass);
+    }
+
+    private function createSessionWithAnswers(int $correctCount, int $totalQuestions, int $passingScore): MockExamSession
+    {
+        $mockExam = MockExam::factory()->published()->passingScore($passingScore)->create();
+        $questions = collect();
+        for ($i = 0; $i < $totalQuestions; $i++) {
+            $questions->push(MockExamQuestion::factory()->forMockExam($mockExam)->withOptions(2, 0)->create(['order' => $i]));
+        }
+
+        $session = MockExamSession::factory()->forMockExam($mockExam)->inProgress()->create([
+            'generated_question_ids' => $questions->pluck('id')->all(),
+            'total_questions' => $totalQuestions,
+            'passing_score_snapshot' => $passingScore,
+        ]);
+
+        foreach ($questions as $index => $question) {
+            $selected = $question->options->firstWhere('is_correct', $index < $correctCount);
+            MockExamAnswer::factory()->create([
+                'mock_exam_session_id' => $session->id,
+                'mock_exam_question_id' => $question->id,
+                'selected_option_id' => $selected->id,
+                'selected_option_body' => $selected->body,
+                'is_correct' => false,
+                'answered_at' => now(),
+            ]);
+        }
+
+        return $session;
     }
 }

@@ -42,7 +42,7 @@ class CrudTest extends TestCase
         $admin = User::factory()->admin()->create();
         $cert = Certification::factory()->published()->create();
 
-        foreach ([1, 100] as $passingScore) {
+        foreach ([0, 1, 100] as $passingScore) {
             $this->actingAs($admin)
                 ->post(route('admin.mock-exams.store'), [
                     'certification_id' => $cert->id,
@@ -55,6 +55,7 @@ class CrudTest extends TestCase
 
         $this->assertDatabaseHas('mock_exams', ['passing_score' => 1]);
         $this->assertDatabaseHas('mock_exams', ['passing_score' => 100]);
+        $this->assertDatabaseHas('mock_exams', ['passing_score' => 0]);
     }
 
     public function test_invalid_passing_score_is_not_saved_on_create(): void
@@ -118,7 +119,7 @@ class CrudTest extends TestCase
         $this->actingAs($admin)
             ->get(route('admin.mock-exams.create'))
             ->assertOk()
-            ->assertSee('1〜100 の整数。受講生がこの百分率以上で合格');
+            ->assertSee('0〜100 の整数。受講生がこの百分率以上で合格');
     }
 
     public function test_store_silently_drops_time_limit_minutes_field(): void
@@ -193,7 +194,7 @@ class CrudTest extends TestCase
         $admin = User::factory()->admin()->create();
         $mockExam = MockExam::factory()->create(['passing_score' => 60]);
 
-        foreach ([1, 100] as $passingScore) {
+        foreach ([0, 1, 100] as $passingScore) {
             $this->actingAs($admin)
                 ->put(route('admin.mock-exams.update', $mockExam), [
                     'title' => "Boundary {$passingScore}",

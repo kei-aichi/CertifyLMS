@@ -172,6 +172,7 @@ class StoreRequestTest extends TestCase
     public static function validPassingScores(): array
     {
         return [
+            'passing_score 0' => [0],
             'passing_score 1' => [1],
             'passing_score 100' => [100],
         ];
@@ -189,7 +190,6 @@ class StoreRequestTest extends TestCase
             'order 負数で 422' => ['order', -1],
             'order 65536 で 422' => ['order', 65536],
             'order 非整数で 422' => ['order', 'abc'],
-            'passing_score 0 で 422' => ['passing_score', 0],
             'passing_score 負数で 422' => ['passing_score', -1],
             'passing_score 101 で 422' => ['passing_score', 101],
             'passing_score 150 で 422' => ['passing_score', 150],

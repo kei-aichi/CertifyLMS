@@ -215,6 +215,28 @@ class LifecycleTest extends TestCase
             ->assertStatus(409);
     }
 
+    public function test_submit_rolls_back_zero_question_session(): void
+    {
+        $student = User::factory()->student()->create();
+        $session = MockExamSession::factory()->forUser($student)->inProgress()->create([
+            'total_questions' => 0,
+            'passing_score_snapshot' => 0,
+            'score_percentage' => null,
+            'pass' => null,
+        ]);
+
+        $this->actingAs($student)
+            ->postJson(route('mock-exam-sessions.submit', $session))
+            ->assertStatus(409);
+
+        $session->refresh();
+        $this->assertSame(MockExamSessionStatus::InProgress, $session->status);
+        $this->assertNull($session->submitted_at);
+        $this->assertNull($session->graded_at);
+        $this->assertNull($session->score_percentage);
+        $this->assertNull($session->pass);
+    }
+
     public function test_graduated_student_cannot_submit_session(): void
     {
         $student = User::factory()->student()->inProgress()->create();
