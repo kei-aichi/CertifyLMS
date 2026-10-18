@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\AiChatConversationController;
+use App\Http\Controllers\AiChatMessageController;
 use App\Http\Controllers\AnnouncementController;
 use App\Http\Controllers\Auth\OnboardingController;
 use App\Http\Controllers\BrowseController;
@@ -121,6 +123,15 @@ Route::middleware('auth')->group(function () {
 // 受講生専用ルート(受講中ステータスのみ通過、卒業ステータスはロック)
 // ============================================================
 Route::middleware(['auth', 'role:student', 'active-learning'])->group(function () {
+    Route::middleware('ai-chat.enabled')->prefix('ai-chat')->name('ai-chat.')->group(function () {
+        Route::get('/', [AiChatConversationController::class, 'index'])->name('index');
+        Route::post('conversations', [AiChatConversationController::class, 'store'])->name('conversations.store');
+        Route::get('conversations/{conversation}', [AiChatConversationController::class, 'show'])->name('conversations.show');
+        Route::patch('conversations/{conversation}', [AiChatConversationController::class, 'update'])->name('conversations.update');
+        Route::delete('conversations/{conversation}', [AiChatConversationController::class, 'destroy'])->name('conversations.destroy');
+        Route::post('conversations/{conversation}/messages', [AiChatMessageController::class, 'store'])->name('conversations.messages.store');
+    });
+
     // 資格カタログ(受講生視点の閲覧)
     Route::get('certifications', [CertificationCatalogController::class, 'index'])
         ->name('certifications.index');
