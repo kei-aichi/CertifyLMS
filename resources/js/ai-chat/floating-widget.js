@@ -48,6 +48,7 @@ export function initAiChatWidget() {
 
     let lastFocus = null;
     let currentConversationId = null;
+    let forceNewConversation = false;
     try {
         const savedConvId = sessionStorage.getItem(STORAGE_CONV);
         const savedSectionId = sessionStorage.getItem(STORAGE_CONV_SECTION);
@@ -153,7 +154,10 @@ export function initAiChatWidget() {
     }
 
     function describeError(err) {
+        if (err?.type === 'pending') return 'この会話は現在処理中です。完了後に再度お試しください。';
         if (err?.type === 'rate-limit') return '本日の利用上限に達しました。明日 0:00 以降に再度ご利用ください。';
+        if (err?.type === 'unavailable') return 'AIチャットは現在利用できません。時間をおいて再度お試しください。';
+        if (err?.type === 'forbidden') return 'この会話を利用する権限がありません。';
         if (err?.type === 'llm') {
             const upstream = err.upstreamStatus;
             if (upstream === 429) {
@@ -165,6 +169,7 @@ export function initAiChatWidget() {
             return 'AI が応答できませんでした。再度お試しください。';
         }
         if (err?.type === 'validation') return '入力内容を確認してください (1-2000 文字)。';
+        if (err?.type === 'network') return '通信に失敗しました。時間をおいて再度お試しください。';
         return '送信に失敗しました。時間をおいて再度お試しください。';
     }
 
@@ -212,6 +217,7 @@ export function initAiChatWidget() {
      */
     function startNewConversation() {
         currentConversationId = null;
+        forceNewConversation = true;
         try {
             sessionStorage.removeItem(STORAGE_CONV);
             sessionStorage.removeItem(STORAGE_CONV_SECTION);
@@ -255,6 +261,7 @@ export function initAiChatWidget() {
             source: 'widget',
         };
         if (sectionId) body.section_id = sectionId;
+        if (forceNewConversation) body.force_new = true;
 
         // Accept: application/json により Controller は redirect ではなく JSON を返す
         // (200 = 既存会話再開 / 201 = 新規作成)
@@ -270,12 +277,15 @@ export function initAiChatWidget() {
             body: JSON.stringify(body),
         });
         if (!res.ok) {
-            throw new Error(`conversation create failed (HTTP ${res.status})`);
+            const error = new Error('conversation create failed');
+            error.status = res.status;
+            throw error;
         }
 
         const data = await res.json().catch(() => null);
         if (data?.conversation?.id) {
             currentConversationId = data.conversation.id;
+            forceNewConversation = false;
             try {
                 sessionStorage.setItem(STORAGE_CONV, currentConversationId);
                 // section コンテキストの「鍵」を保存 → 次回 init 時に sectionId 一致を確認
@@ -312,7 +322,7 @@ export function initAiChatWidget() {
             await client.sendSync(content);
         } catch (err) {
             typingNode.remove();
-            appendAssistantBubble('送信に失敗しました。', { isError: true });
+            appendAssistantBubble(describeError({ type: err?.status === 409 ? 'pending' : 'network' }), { isError: true });
         } finally {
             sendBtn.disabled = false;
             input.disabled = false;
