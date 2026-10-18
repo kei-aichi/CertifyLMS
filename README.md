@@ -107,6 +107,110 @@ http://localhost:8000 にアクセスし、下記の[ログインアカウント
 
 このほか、ライフサイクル（招待中 / 受講中 / 卒業 / 退会）を網羅したデモユーザーが投入されます。
 
+### Google Calendar連携（S-A-01）
+
+この機能はSailと既存のデモデータを使って確認できます。まず[環境構築手順](#環境構築手順)を完了し、`sail up -d`でアプリケーションを起動してください。Google設定を行わなくても、LMS内の空き枠表示・予約・キャンセルは従来どおり動作します。
+
+#### 1. Google Cloud側の準備
+
+Google Cloud Console（<https://console.cloud.google.com/>）へGoogleアカウントでログインします。画面名は変更される可能性があるため、必要に応じて公式ガイドも参照してください。
+
+- [Google Calendar APIを有効にする公式手順](https://developers.google.com/workspace/calendar/api/quickstart)
+- [OAuth 2.0 Web Serverアプリケーション公式ガイド](https://developers.google.com/identity/protocols/oauth2/web-server)
+- [Google Calendar APIのOAuthスコープ](https://developers.google.com/workspace/calendar/api/auth)
+
+1. 画面上部のプロジェクト選択から既存プロジェクトを選ぶか、**新しいプロジェクト**を作成します。
+2. 左上のメニューから **APIとサービス → ライブラリ** を開きます。
+3. `Google Calendar API`を検索し、対象プロジェクトで **有効にする** を押します。
+4. **APIとサービス → OAuth同意画面**を開き、アプリ名、サポートメール、デベロッパー連絡先を入力します。外部ユーザーとして作成した場合は、**テストユーザー**に実際に動作確認するGoogleアカウントのメールアドレスを追加します。
+5. OAuth同意画面のスコープ設定では、次の2つを追加します。カレンダー選択UIはなく、実装はプライマリカレンダー（`primary`）だけを使用します。
+   - `https://www.googleapis.com/auth/calendar.freebusy`
+   - `https://www.googleapis.com/auth/calendar.events.owned`
+6. **APIとサービス → 認証情報 → 認証情報を作成 → OAuthクライアントID**を開き、アプリケーションの種類で **ウェブアプリケーション**を選びます。
+7. **承認済みのリダイレクトURI**に、次のURLを完全一致で追加します。`APP_URL`を変更する場合は、ホスト・ポート・パスを実際のURLに置き換えてください。
+
+   ```text
+   http://localhost:8000/settings/google-calendar/callback
+   ```
+
+8. **作成**を押し、表示されたクライアントIDとクライアントシークレットを安全な場所へ一時的に控えます。既存のクライアントを使う場合は、認証情報一覧から対象クライアントを開いて確認します。
+
+#### 2. `.env`の設定
+
+リポジトリルートの`.env`へ、`config/services.php`が参照する次の変数を設定します。値はREADMEやGitへ記載しないでください。
+
+```dotenv
+GOOGLE_CALENDAR_CLIENT_ID=発行されたクライアントID
+GOOGLE_CALENDAR_CLIENT_SECRET=発行されたクライアントシークレット
+GOOGLE_CALENDAR_REDIRECT_URI=http://localhost:8000/settings/google-calendar/callback
+```
+
+`.env.example`には空値とローカル用リダイレクトURIを記載済みです。設定変更後、実行中のSailコンテナへ反映するため、次を実行します。
+
+```bash
+sail config:clear
+sail up -d --force-recreate
+sail artisan optimize:clear
+```
+
+`config:clear`が利用できない場合は、`./vendor/bin/sail`に読み替えてください。設定値の確認は秘密値を表示しない形で行います。
+
+```bash
+sail artisan tinker --execute="dump(config('services.google_calendar.client_id') !== null, config('services.google_calendar.redirect_uri'));"
+```
+
+期待結果は、1つ目が`true`、2つ目が設定したリダイレクトURIです。クライアントシークレットやトークンは表示しないでください。
+
+#### 3. デモCredentialと実OAuth連携の違い
+
+`migrate:fresh --seed`または`db:seed`をローカル・テスト環境で実行すると、`coach@certify-lms.test`にデモCredentialが1件作成されます。これはGoogle APIへ送信できないダミー値です。
+
+- `coach@certify-lms.test`：デモ上は連携済み。ただし実Google APIには接続できません。
+- `coach2@certify-lms.test`：未連携。Google APIを呼ばず、従来のLMS判定を確認できます。
+- `GoogleCalendarSeeder`は`local`・`testing`環境だけで実行され、既存Credentialを`firstOrCreate`で上書きしません。
+- 実Google確認には、後述の手順でコーチ本人がOAuth連携してください。
+
+#### 4. 実Googleアカウントで連携する
+
+1. `http://localhost:8000`を開きます。
+2. `coach@certify-lms.test`でログインします。初期パスワードは`password`です。
+3. 設定画面の **面談設定** タブを開きます。
+4. **Google Calendarを連携**（表示文言が異なる場合はGoogle連携の開始ボタン）を押します。
+5. Googleの同意画面で、テストユーザーに登録したアカウントを選び、上記2スコープを許可します。
+6. GoogleからLMSへ戻り、面談設定タブに連携済みの状態が表示されることを確認します。
+7. 連携に失敗した場合は、後述のエラー確認を行い、`.env`のリダイレクトURIとGoogle Cloudの登録値が完全一致しているか確認します。
+
+#### 5. Step 6の手動確認
+
+実Googleアカウントで、次の順番で確認します。Google Calendar側の予定はテスト用の時間帯に作成してください。
+
+1. **空き枠**：Google Calendarで予定を作成し、LMSの受講生アカウント（`student@certify-lms.test` / `password`）で面談予約画面を開きます。予定と重なるコーチの枠が人数から除外され、未連携コーチの枠は従来どおり表示されることを確認します。
+2. **予約**：空いている時間帯を予約します。コーチのGoogle Calendarに、タイトルが`面談`、開始・終了が60分、説明欄が固定面談URLだけのイベントとして作成されることを確認します。生徒名、資格名、相談内容、Google Meet URLが含まれていないことも確認します。
+3. **キャンセル**：LMSで予約をキャンセルします。連携中は対応するGoogleイベントが削除され、LMSの面談回数が返却されることを確認します。
+4. **解除**：面談設定タブからGoogle連携を解除します。解除時に既存Googleイベントが削除されないことを確認します。
+5. **解除後キャンセル**：解除後にLMS面談をキャンセルします。LMSのキャンセル・回数返却は成立し、Google Calendarへ削除操作が行われないことを確認します。
+6. **未連携コーチ**：`coach2@certify-lms.test`で連携せず、空き枠と予約を確認します。Google APIを使わず、従来のLMS機能が動くことを確認します。
+
+Google API障害時は、LMSの空き枠・予約・キャンセルが継続することが仕様です。API失敗はサーバーログへ記録されますが、トークンやGoogleのレスポンス本文はログへ出力しません。
+
+#### 6. よくあるエラー
+
+| 症状 | 確認箇所 |
+|---|---|
+| `redirect_uri_mismatch` | `.env`の`GOOGLE_CALENDAR_REDIRECT_URI`とGoogle Cloudの承認済みURIが完全一致しているか確認し、`sail artisan optimize:clear`後にコンテナを再起動する |
+| `access_denied` | OAuth同意画面のテストユーザーに、ログイン中のGoogleアカウントを追加する |
+| OAuthクライアントが見つからない | `.env`のClient ID・Secretが同じGoogle Cloudプロジェクトのものか確認する。値をログへ出さない |
+| 連携開始時に設定エラー | `.env`の3変数、`config/services.php`の参照名、Sailコンテナの再作成を確認する |
+| 空き枠が減らない | Google予定の時間帯、連携コーチ、Calendar API有効化、FreeBusy scope、アプリのログを確認する |
+| 予約イベントが作成されない | アクセス期限、refresh token、`calendar.events.owned` scope、Google側の権限を確認する。LMS予約自体は継続する |
+| キャンセルでGoogle予定が消えない | 連携解除済み・再連携済みでは仕様上Google操作を行わない。連携中の場合はイベントIDとログを確認する |
+
+実Googleのトークン失効や権限変更を再現する場合は、テスト用Googleアカウントを使用してください。アクセストークン、リフレッシュトークン、クライアントシークレットをIssue、README、コミット、画面共有、ログへ貼り付けないでください。
+
+#### Gemini・Stripeについて
+
+Advanceの外部API対象にはGemini・Stripeも含まれますが、現時点のこのリポジトリではS-A-01のGoogle Calendar連携以外に、GeminiまたはStripe用の実装・環境変数設定は確認できません。未実装機能のAPIキー名やセットアップ手順はREADMEへ追加しません。新しい実装で環境変数が必要になった場合は、`.env.example`とREADMEへ同時に追記してください。
+
 > 本サービスは**招待制**です。公開の会員登録画面はありません。新規ユーザーを作るには、管理者でログイン → ユーザー管理から招待 → Mailpit で招待メールの URL を開く → オンボーディング登録、という流れになります。
 
 ## S-B-09 面談リマインダー通知の動作確認
