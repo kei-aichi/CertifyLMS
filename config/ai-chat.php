@@ -6,6 +6,7 @@ return [
     'enabled' => (bool) env('AI_CHAT_ENABLED', false),
     'daily_limit' => (int) env('AI_CHAT_DAILY_LIMIT', 20),
     'auto_title_enabled' => (bool) env('AI_CHAT_AUTO_TITLE_ENABLED', true),
+    'pending_timeout_seconds' => (int) env('AI_CHAT_PENDING_TIMEOUT_SECONDS', 120),
 
     'gemini' => [
         'api_key' => env('GEMINI_API_KEY'),

@@ -370,6 +370,7 @@ sail bin pint --test     # 整形漏れの確認（CI 相当のチェック）
 - `AI_CHAT_ENABLED` — Gemini AI チャットボットの機能スイッチです（既定値 `false`）。
 - `AI_CHAT_DAILY_LIMIT` — 受講生1人あたりの1日送信上限です（既定値 `20`）。
 - `AI_CHAT_AUTO_TITLE_ENABLED` — 会話タイトルの自動生成を有効にします（既定値 `true`）。
+- `AI_CHAT_PENDING_TIMEOUT_SECONDS` — 送信処理中（pending）を復旧対象とする経過秒数です（初期候補 `120` 秒。復旧処理はStep 5-2で実装します）。
 - `GEMINI_API_KEY`、`GEMINI_MODEL`、`GEMINI_CONNECT_TIMEOUT`、`GEMINI_TIMEOUT`、`GEMINI_MAX_RETRIES` — Gemini API連携の認証、モデル、タイムアウト、再試行設定です。
 
 新しい環境変数やセットアップ手順を追加した場合は、`.env.example` と本 README に追記し、チームの誰でも環境を再現できる状態を保ってください。
