@@ -18,6 +18,7 @@ use App\Models\Part;
 use App\Models\Section;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class ConversationCrudTest extends TestCase
@@ -155,5 +156,68 @@ class ConversationCrudTest extends TestCase
         AiChatConversation::factory()->create(['user_id' => $user->id, 'section_id' => $section->id, 'enrollment_id' => $enrollment->id, 'source' => 'widget', 'last_message_at' => now()->subDay()]);
         $latest = AiChatConversation::factory()->create(['user_id' => $user->id, 'section_id' => $section->id, 'enrollment_id' => $enrollment->id, 'source' => 'widget', 'last_message_at' => now()]);
         $this->actingAs($user)->postJson(route('ai-chat.conversations.store'), ['source' => 'widget', 'section_id' => $section->id, 'enrollment_id' => $enrollment->id])->assertOk()->assertJsonPath('conversation.id', $latest->id);
+    }
+
+    public function test_initial_message_stale_recovery_is_kept_when_daily_limit_returns_429(): void
+    {
+        config(['ai-chat.enabled' => true, 'ai-chat.gemini.api_key' => 'test-key']);
+        Http::fake();
+        $user = $this->student();
+        $cert = Certification::factory()->create();
+        $section = $this->publishedSection($cert);
+        $enrollment = Enrollment::factory()->for($user)->for($cert)->learning()->create();
+        $conversation = AiChatConversation::factory()->create([
+            'user_id' => $user->id,
+            'section_id' => $section->id,
+            'enrollment_id' => $enrollment->id,
+            'source' => 'widget',
+        ]);
+        $pending = AiChatMessage::factory()->pending()->create([
+            'conversation_id' => $conversation->id,
+            'role' => 'user',
+        ]);
+        AiChatMessage::query()->whereKey($pending->id)->update(['updated_at' => now()->subMinutes(10)]);
+        AiChatDailyUsage::factory()->for($user)->create(['send_count' => 20]);
+
+        $this->actingAs($user)->postJson(route('ai-chat.conversations.store'), [
+            'source' => 'widget',
+            'section_id' => $section->id,
+            'enrollment_id' => $enrollment->id,
+            'message' => '新しい質問',
+        ])->assertStatus(429);
+
+        $this->assertDatabaseHas('ai_chat_messages', [
+            'id' => $pending->id,
+            'status' => 'completed',
+            'error_detail' => 'stale_pending',
+        ]);
+        $this->assertDatabaseHas('ai_chat_messages', [
+            'conversation_id' => $conversation->id,
+            'role' => 'assistant',
+            'status' => 'error',
+            'error_detail' => 'stale_pending',
+        ]);
+        $this->assertDatabaseMissing('ai_chat_messages', ['content' => '新しい質問']);
+        $this->assertDatabaseHas('ai_chat_daily_usages', ['user_id' => $user->id, 'send_count' => 20]);
+        $this->assertDatabaseCount('ai_chat_conversations', 1);
+        Http::assertNothingSent();
+    }
+
+    public function test_initial_message_active_pending_returns_409_without_mutation(): void
+    {
+        config(['ai-chat.enabled' => true, 'ai-chat.gemini.api_key' => 'test-key']);
+        Http::fake();
+        $user = $this->student();
+        $cert = Certification::factory()->create();
+        $section = $this->publishedSection($cert);
+        $enrollment = Enrollment::factory()->for($user)->for($cert)->learning()->create();
+        $conversation = AiChatConversation::factory()->create(['user_id' => $user->id, 'section_id' => $section->id, 'enrollment_id' => $enrollment->id, 'source' => 'widget']);
+        $pending = AiChatMessage::factory()->pending()->create(['conversation_id' => $conversation->id, 'role' => 'user']);
+
+        $this->actingAs($user)->postJson(route('ai-chat.conversations.store'), ['source' => 'widget', 'section_id' => $section->id, 'enrollment_id' => $enrollment->id, 'message' => '新しい質問'])->assertStatus(409);
+
+        $this->assertDatabaseHas('ai_chat_messages', ['id' => $pending->id, 'status' => 'pending']);
+        $this->assertDatabaseMissing('ai_chat_messages', ['content' => '新しい質問']);
+        Http::assertNothingSent();
     }
 }

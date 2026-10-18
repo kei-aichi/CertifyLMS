@@ -75,6 +75,11 @@ final class ReserveAction
         });
     }
 
+    public function recoverStale(User $user, AiChatConversation $conversation): void
+    {
+        $this->recoverStalePending($user, $conversation);
+    }
+
     private function recoverStalePending(User $user, AiChatConversation $conversation): void
     {
         DB::transaction(function () use ($user, $conversation): void {
