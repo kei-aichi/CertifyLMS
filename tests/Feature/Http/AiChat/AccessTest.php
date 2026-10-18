@@ -36,11 +36,11 @@ class AccessTest extends TestCase
         }
     }
 
-    public function test_in_progress_student_reaches_controller_boundary(): void
+    public function test_in_progress_student_can_open_ai_chat(): void
     {
         $this->actingAs(User::factory()->student()->inProgress()->create())
             ->get(route('ai-chat.index'))
-            ->assertStatus(501);
+            ->assertOk();
     }
 
     public function test_feature_disabled_returns_not_found(): void
