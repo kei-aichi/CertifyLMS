@@ -14,7 +14,7 @@ use JsonException;
 
 final class GeminiChatService
 {
-    public function generate(AiChatPrompt $prompt): GeminiChatResult
+    public function generate(AiChatPrompt $prompt, bool $forTitle = false): GeminiChatResult
     {
         $apiKey = config('ai-chat.gemini.api_key');
         if (! is_string($apiKey) || trim($apiKey) === '') {
@@ -23,14 +23,14 @@ final class GeminiChatService
 
         $model = (string) config('ai-chat.gemini.model', 'gemini-2.5-flash');
         $url = "https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent";
-        $maxRetries = max(0, (int) config('ai-chat.gemini.max_retries', 2));
+        $maxRetries = max(0, (int) config('ai-chat.gemini.'.($forTitle ? 'title_max_retries' : 'max_retries'), $forTitle ? 0 : 2));
         $startedAt = microtime(true);
 
         for ($attempt = 0; $attempt <= $maxRetries; $attempt++) {
             try {
                 $response = Http::withHeaders(['x-goog-api-key' => $apiKey])
                     ->connectTimeout((int) config('ai-chat.gemini.connect_timeout', 10))
-                    ->timeout((int) config('ai-chat.gemini.timeout', 30))
+                    ->timeout((int) config('ai-chat.gemini.'.($forTitle ? 'title_timeout' : 'timeout'), $forTitle ? 10 : 30))
                     ->post($url, $prompt->toGeminiPayload());
             } catch (ConnectionException $exception) {
                 throw new GeminiApiException('Gemini connection failed.', 0, false);

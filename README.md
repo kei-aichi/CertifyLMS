@@ -372,5 +372,8 @@ sail bin pint --test     # 整形漏れの確認（CI 相当のチェック）
 - `AI_CHAT_AUTO_TITLE_ENABLED` — 会話タイトルの自動生成を有効にします（既定値 `true`）。
 - `AI_CHAT_PENDING_TIMEOUT_SECONDS` — 送信処理中（pending）を復旧対象とする経過秒数です（初期候補 `120` 秒。復旧処理はStep 5-2で実装します）。
 - `GEMINI_API_KEY`、`GEMINI_MODEL`、`GEMINI_CONNECT_TIMEOUT`、`GEMINI_TIMEOUT`、`GEMINI_MAX_RETRIES` — Gemini API連携の認証、モデル、タイムアウト、再試行設定です。
+- `GEMINI_TITLE_TIMEOUT`、`GEMINI_TITLE_MAX_RETRIES` — afterResponseで実行する自動タイトル生成用のtimeout・再試行設定です。タイトル生成は補助処理のため、既定値は10秒・0回です。
+
+AIチャットの自動タイトル生成はHTTPレスポンス送信後のLaravel afterResponseで実行します。afterResponseはQueue Workerではないため、PHP-FPM・Webサーバー・プロキシのtimeoutやプロセス終了によりタイトル生成が完了しない場合があります。その場合も回答済みの会話・メッセージは保持され、タイトルは既存値のままです。
 
 新しい環境変数やセットアップ手順を追加した場合は、`.env.example` と本 README に追記し、チームの誰でも環境を再現できる状態を保ってください。

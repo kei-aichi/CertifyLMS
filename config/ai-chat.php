@@ -14,5 +14,7 @@ return [
         'connect_timeout' => (int) env('GEMINI_CONNECT_TIMEOUT', 10),
         'timeout' => (int) env('GEMINI_TIMEOUT', 30),
         'max_retries' => (int) env('GEMINI_MAX_RETRIES', 2),
+        'title_timeout' => (int) env('GEMINI_TITLE_TIMEOUT', 10),
+        'title_max_retries' => (int) env('GEMINI_TITLE_MAX_RETRIES', 0),
     ],
 ];
