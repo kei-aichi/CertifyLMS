@@ -113,6 +113,39 @@ class ReserveActionTest extends TestCase
         }
     }
 
+    public function test_stale_pending_is_closed_without_usage_charge_and_new_reservation_is_created(): void
+    {
+        $user = User::factory()->student()->inProgress()->create();
+        $conversation = AiChatConversation::factory()->create(['user_id' => $user->id]);
+        $stale = AiChatMessage::factory()->pending()->create(['conversation_id' => $conversation->id]);
+        AiChatMessage::query()->whereKey($stale->id)->update(['updated_at' => now()->subMinutes(10)]);
+
+        $newMessage = app(ReserveAction::class)($user, $conversation, '再送');
+
+        $this->assertSame(AiChatMessageStatus::Pending, $newMessage->status);
+        $this->assertDatabaseHas('ai_chat_messages', ['id' => $stale->id, 'status' => 'completed', 'error_detail' => 'stale_pending']);
+        $this->assertDatabaseHas('ai_chat_messages', ['role' => 'assistant', 'status' => 'error', 'error_detail' => 'stale_pending']);
+        $this->assertDatabaseHas('ai_chat_daily_usages', ['user_id' => $user->id, 'send_count' => 1]);
+    }
+
+    public function test_stale_recovery_is_committed_before_daily_limit_rejection(): void
+    {
+        $user = User::factory()->student()->inProgress()->create();
+        $conversation = AiChatConversation::factory()->create(['user_id' => $user->id]);
+        $stale = AiChatMessage::factory()->pending()->create(['conversation_id' => $conversation->id]);
+        AiChatMessage::query()->whereKey($stale->id)->update(['updated_at' => now()->subMinutes(10)]);
+        AiChatDailyUsage::factory()->for($user)->create(['send_count' => 20]);
+
+        $this->expectException(AiChatDailyLimitExceededException::class);
+        try {
+            app(ReserveAction::class)($user, $conversation, '質問');
+        } finally {
+            $this->assertDatabaseHas('ai_chat_messages', ['id' => $stale->id, 'status' => 'completed', 'error_detail' => 'stale_pending']);
+            $this->assertDatabaseHas('ai_chat_daily_usages', ['user_id' => $user->id, 'send_count' => 20]);
+            $this->assertDatabaseCount('ai_chat_messages', 2);
+        }
+    }
+
     public function test_missing_api_key_does_not_create_usage_or_message(): void
     {
         config(['ai-chat.gemini.api_key' => null]);

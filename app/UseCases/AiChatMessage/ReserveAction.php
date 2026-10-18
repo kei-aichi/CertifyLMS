@@ -27,6 +27,8 @@ final class ReserveAction
         $limit = (int) config('ai-chat.daily_limit', 20);
         $today = now(config('app.timezone', 'Asia/Tokyo'))->toDateString();
 
+        $this->recoverStalePending($user, $conversation);
+
         return DB::transaction(function () use ($user, $conversation, $content, $limit, $today): AiChatMessage {
             $lockedUser = User::query()->whereKey($user->getKey())->lockForUpdate()->firstOrFail();
             $lockedConversation = AiChatConversation::query()
@@ -42,8 +44,6 @@ final class ReserveAction
                 ->first();
 
             if ($pending !== null) {
-                // Step 5-2 will recover stale rows under these same locks. Until then,
-                // rejecting every existing pending row prevents duplicate in-flight work.
                 throw new AiChatPendingException;
             }
 
@@ -72,6 +72,45 @@ final class ReserveAction
                 'status' => AiChatMessageStatus::Pending,
                 'content' => $content,
             ]);
+        });
+    }
+
+    private function recoverStalePending(User $user, AiChatConversation $conversation): void
+    {
+        DB::transaction(function () use ($user, $conversation): void {
+            $lockedUser = User::query()->whereKey($user->getKey())->lockForUpdate()->firstOrFail();
+            $lockedConversation = AiChatConversation::query()->whereKey($conversation->getKey())->lockForUpdate()->firstOrFail();
+            Gate::forUser($lockedUser)->authorize('sendMessage', $lockedConversation);
+
+            $pending = $lockedConversation->messages()
+                ->where('role', AiChatMessageRole::User->value)
+                ->where('status', AiChatMessageStatus::Pending->value)
+                ->first();
+            if ($pending === null) {
+                return;
+            }
+
+            $timeout = max(1, (int) config('ai-chat.pending_timeout_seconds', 120));
+            if ($pending->updated_at !== null && $pending->updated_at->gt(now()->subSeconds($timeout))) {
+                throw new AiChatPendingException;
+            }
+
+            $updated = AiChatMessage::query()
+                ->whereKey($pending->getKey())
+                ->where('status', AiChatMessageStatus::Pending->value)
+                ->update([
+                    'status' => AiChatMessageStatus::Completed->value,
+                    'error_detail' => 'stale_pending',
+                    'updated_at' => now(),
+                ]);
+            if ($updated === 1) {
+                $lockedConversation->messages()->create([
+                    'role' => AiChatMessageRole::Assistant,
+                    'status' => AiChatMessageStatus::Error,
+                    'content' => '前回のAI応答が完了しなかったため、処理を終了しました。',
+                    'error_detail' => 'stale_pending',
+                ]);
+            }
         });
     }
 }
