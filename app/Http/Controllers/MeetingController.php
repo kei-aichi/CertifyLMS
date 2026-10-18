@@ -530,8 +530,25 @@ class MeetingController extends Controller
             return;
         }
 
+        $apiConnectionId = (string) $meeting->google_connection_id;
+        $eventId = (string) $meeting->google_event_id;
+
         try {
-            $googleCalendar->deleteEvent($credential, $meeting->google_connection_id, $meeting->google_event_id);
+            $googleCalendar->deleteEvent($credential, $apiConnectionId, $eventId);
+
+            $latest = Meeting::query()
+                ->with('coach.googleCredential')
+                ->find($meeting->getKey());
+            $currentConnectionId = $latest?->coach?->googleCredential?->getKey();
+
+            if ($latest === null || $currentConnectionId !== $apiConnectionId) {
+                Log::warning('Google event deletion completed after connection state changed.', [
+                    'operation' => 'event_delete_state_changed',
+                    'meeting_id' => $meeting->getKey(),
+                    'connection_id' => $apiConnectionId,
+                    'error_class' => 'connection_state_changed',
+                ]);
+            }
         } catch (\Throwable $exception) {
             Log::warning('Google Calendar event deletion failed.', [
                 'operation' => 'event_delete',

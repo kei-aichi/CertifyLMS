@@ -674,6 +674,52 @@ class MeetingControllerTest extends TestCase
         $this->assertSame($before + 1, app(MeetingQuotaService::class)->remaining($student));
     }
 
+    public function test_google_delete_rechecks_connection_after_api_call(): void
+    {
+        [$meeting, $credential] = $this->makeGoogleMeetingForCompensation();
+        $meeting->update(['google_event_id' => 'event-delete']);
+        $google = Mockery::mock(GoogleCalendarService::class);
+        $google->shouldReceive('deleteEvent')->once()->andReturnTrue();
+
+        $this->invokeDeleteGoogleEventAfterCommit($meeting, $google);
+
+        $this->assertDatabaseHas('google_credentials', ['id' => $credential->id]);
+    }
+
+    public function test_google_delete_does_not_operate_again_after_disconnect_during_api_call(): void
+    {
+        [$meeting, $credential] = $this->makeGoogleMeetingForCompensation();
+        $meeting->update(['google_event_id' => 'event-delete']);
+        $google = Mockery::mock(GoogleCalendarService::class);
+        $google->shouldReceive('deleteEvent')->once()->andReturnUsing(function () use ($credential): bool {
+            $credential->delete();
+
+            return true;
+        });
+
+        $this->invokeDeleteGoogleEventAfterCommit($meeting, $google);
+
+        $this->assertDatabaseMissing('google_credentials', ['id' => $credential->id]);
+    }
+
+    public function test_google_delete_does_not_operate_again_after_reconnection_during_api_call(): void
+    {
+        [$meeting, $credential] = $this->makeGoogleMeetingForCompensation();
+        $meeting->update(['google_event_id' => 'event-delete']);
+        $google = Mockery::mock(GoogleCalendarService::class);
+        $google->shouldReceive('deleteEvent')->once()->andReturnUsing(function () use ($credential): bool {
+            $credential->delete();
+            GoogleCredential::factory()->create(['coach_id' => $credential->coach_id]);
+
+            return true;
+        });
+
+        $this->invokeDeleteGoogleEventAfterCommit($meeting, $google);
+
+        $this->assertDatabaseCount('google_credentials', 1);
+        $this->assertNotSame($credential->id, GoogleCredential::query()->firstOrFail()->id);
+    }
+
     public function test_event_creation_race_compensates_when_meeting_was_canceled(): void
     {
         [$meeting, $credential] = $this->makeGoogleMeetingForCompensation();
@@ -735,6 +781,13 @@ class MeetingControllerTest extends TestCase
     private function invokeCreateGoogleEventAfterCommit(Meeting $meeting, GoogleCalendarService $google): void
     {
         $method = new \ReflectionMethod(app(MeetingController::class), 'createGoogleEventAfterCommit');
+        $method->setAccessible(true);
+        $method->invoke(app(MeetingController::class), $meeting->fresh(), $google);
+    }
+
+    private function invokeDeleteGoogleEventAfterCommit(Meeting $meeting, GoogleCalendarService $google): void
+    {
+        $method = new \ReflectionMethod(app(MeetingController::class), 'deleteGoogleEventAfterCommit');
         $method->setAccessible(true);
         $method->invoke(app(MeetingController::class), $meeting->fresh(), $google);
     }
