@@ -122,6 +122,33 @@ class ConversationCrudTest extends TestCase
         $this->assertSame(['id', 'title', 'section_id', 'created_at', 'last_message_at'], array_keys($sent->json('conversation')));
     }
 
+    public function test_student_chat_blade_hides_operational_metadata(): void
+    {
+        config(['ai-chat.enabled' => true]);
+        $user = $this->student();
+        $conversation = AiChatConversation::factory()->for($user)->create(['title' => '表示タイトル']);
+        AiChatMessage::factory()->for($conversation, 'conversation')->create([
+            'role' => 'assistant',
+            'status' => 'completed',
+            'content' => '表示本文',
+            'model' => 'gemini-2.5-flash',
+            'input_tokens' => 10,
+            'output_tokens' => 20,
+            'response_time_ms' => 500,
+            'error_detail' => 'internal_detail',
+        ]);
+
+        $response = $this->actingAs($user)->get(route('ai-chat.conversations.show', $conversation));
+
+        $response->assertOk()
+            ->assertSee('表示タイトル')
+            ->assertSee('表示本文')
+            ->assertDontSee('gemini-2.5-flash')
+            ->assertDontSee('internal_detail')
+            ->assertDontSee('tokens')
+            ->assertDontSee('0.5 s');
+    }
+
     public function test_section_conversation_is_reused_unless_force_new(): void
     {
         config(['ai-chat.enabled' => true]);
