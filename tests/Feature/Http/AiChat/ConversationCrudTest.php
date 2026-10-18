@@ -76,13 +76,13 @@ class ConversationCrudTest extends TestCase
         $this->assertDatabaseCount('ai_chat_conversations', 2);
     }
 
-    public function test_initial_message_returns_501_without_persisting_anything(): void
+    public function test_initial_message_without_api_key_returns_503_without_persisting_anything(): void
     {
         config(['ai-chat.enabled' => true]);
         $user = $this->student();
         $this->actingAs($user)->postJson(route('ai-chat.conversations.store'), [
             'source' => 'widget', 'message' => '質問',
-        ])->assertStatus(501);
+        ])->assertStatus(503);
         $this->assertDatabaseCount('ai_chat_conversations', 0);
         $this->assertDatabaseCount('ai_chat_messages', 0);
         $this->assertDatabaseCount('ai_chat_daily_usages', 0);

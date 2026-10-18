@@ -12,15 +12,11 @@ use App\Models\Section;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
-use Symfony\Component\HttpKernel\Exception\HttpException;
 
 final class StoreAction
 {
     public function __invoke(User $user, array $data): AiChatConversation
     {
-        if (filled($data['message'] ?? null)) {
-            throw new HttpException(501, '初回メッセージ送信はStep 5で実装します。');
-        }
         $section = isset($data['section_id']) ? Section::query()->with('chapter.part.certification')->findOrFail($data['section_id']) : null;
         $enrollment = isset($data['enrollment_id']) ? $user->enrollments()->whereKey($data['enrollment_id'])->firstOrFail() : null;
         if ($section !== null) {

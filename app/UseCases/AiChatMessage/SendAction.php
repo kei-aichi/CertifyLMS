@@ -28,6 +28,12 @@ final class SendAction
     {
         $message = ($this->reserve)($user, $conversation, $content);
 
+        return $this->sendReserved($user, $conversation, $message);
+    }
+
+    public function sendReserved(User $user, AiChatConversation $conversation, AiChatMessage $message): ?AiChatMessage
+    {
+
         try {
             $prompt = $this->promptBuilder->build($conversation->fresh(), $message->fresh());
             $result = $this->gemini->generate($prompt);
