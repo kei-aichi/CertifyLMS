@@ -56,6 +56,72 @@ class ConversationCrudTest extends TestCase
         $this->assertDatabaseCount('ai_chat_daily_usages', 1);
     }
 
+    public function test_student_json_excludes_internal_message_and_conversation_metadata(): void
+    {
+        config(['ai-chat.enabled' => true]);
+        $user = $this->student();
+        $conversation = AiChatConversation::factory()->for($user)->create([
+            'auto_title_enabled' => false,
+            'title_manually_edited_at' => now(),
+        ]);
+        $message = AiChatMessage::factory()->for($conversation, 'conversation')->create([
+            'role' => 'assistant',
+            'status' => 'completed',
+            'content' => '回答',
+            'model' => 'gemini-2.5-flash',
+            'input_tokens' => 12,
+            'output_tokens' => 8,
+            'response_time_ms' => 321,
+            'error_detail' => null,
+        ]);
+
+        $response = $this->actingAs($user)->getJson(route('ai-chat.conversations.show', $conversation));
+
+        $response->assertOk()
+            ->assertJsonPath('conversation.id', $conversation->id)
+            ->assertJsonPath('messages.0.id', $message->id)
+            ->assertJsonMissingPath('conversation.auto_title_enabled')
+            ->assertJsonMissingPath('conversation.title_manually_edited_at')
+            ->assertJsonMissingPath('messages.0.model')
+            ->assertJsonMissingPath('messages.0.input_tokens')
+            ->assertJsonMissingPath('messages.0.output_tokens')
+            ->assertJsonMissingPath('messages.0.response_time_ms')
+            ->assertJsonMissingPath('messages.0.error_detail');
+    }
+
+    public function test_all_json_endpoints_expose_only_the_student_contract(): void
+    {
+        config(['ai-chat.enabled' => true, 'ai-chat.gemini.api_key' => 'test-key']);
+        Http::fake(['https://generativelanguage.googleapis.com/*' => Http::response([
+            'modelVersion' => 'gemini-2.5-flash',
+            'candidates' => [['content' => ['parts' => [['text' => '回答']]], 'finishReason' => 'STOP']],
+        ], 200)]);
+        $user = User::factory()->student()->inProgress()->create();
+
+        $created = $this->actingAs($user)->postJson(route('ai-chat.conversations.store'), ['source' => 'widget']);
+        $created->assertCreated();
+        $this->assertSame(['conversation'], array_keys($created->json()));
+        $this->assertSame(['id', 'title', 'section_id', 'created_at', 'last_message_at'], array_keys($created->json('conversation')));
+        $conversation = AiChatConversation::firstOrFail();
+
+        $shown = $this->actingAs($user)->getJson(route('ai-chat.conversations.show', $conversation));
+        $shown->assertOk();
+        $this->assertSame(['conversation', 'messages'], array_keys($shown->json()));
+        $this->assertSame(['id', 'title', 'section_id', 'created_at', 'last_message_at'], array_keys($shown->json('conversation')));
+
+        $updated = $this->actingAs($user)->patchJson(route('ai-chat.conversations.update', $conversation), ['title' => '更新後']);
+        $updated->assertOk();
+        $this->assertSame(['conversation'], array_keys($updated->json()));
+        $this->assertSame(['id', 'title', 'section_id', 'created_at', 'last_message_at'], array_keys($updated->json('conversation')));
+
+        $sent = $this->actingAs($user)->postJson(route('ai-chat.conversations.messages.store', $conversation), ['content' => '質問']);
+        $sent->assertOk();
+        $this->assertSame(['user_message', 'assistant_message', 'conversation'], array_keys($sent->json()));
+        $this->assertSame(['id', 'role', 'status', 'content', 'created_at'], array_keys($sent->json('user_message')));
+        $this->assertSame(['id', 'role', 'status', 'content', 'created_at'], array_keys($sent->json('assistant_message')));
+        $this->assertSame(['id', 'title', 'section_id', 'created_at', 'last_message_at'], array_keys($sent->json('conversation')));
+    }
+
     public function test_section_conversation_is_reused_unless_force_new(): void
     {
         config(['ai-chat.enabled' => true]);

@@ -11,6 +11,7 @@ use App\Exceptions\AiChat\GeminiApiKeyMissingException;
 use App\Http\Requests\AiChat\StoreConversationRequest;
 use App\Http\Requests\AiChat\UpdateConversationRequest;
 use App\Models\AiChatConversation;
+use App\Models\AiChatMessage;
 use App\UseCases\AiChatConversation\DestroyAction;
 use App\UseCases\AiChatConversation\IndexAction;
 use App\UseCases\AiChatConversation\ShowAction;
@@ -54,9 +55,9 @@ class AiChatConversationController extends Controller
             }
             $conversation->refresh();
             $payload = [
-                'user_message' => $conversation->messages()->where('role', 'user')->latest('created_at')->first(),
-                'assistant_message' => $assistant,
-                'conversation' => $conversation,
+                'user_message' => $this->messagePayload($conversation->messages()->where('role', 'user')->latest('created_at')->first()),
+                'assistant_message' => $this->messagePayload($assistant),
+                'conversation' => $this->conversationPayload($conversation),
             ];
             if ($request->expectsJson()) {
                 return response()->json($payload, 200);
@@ -67,7 +68,7 @@ class AiChatConversationController extends Controller
 
         $conversation = $action($request->user(), $data);
         if ($request->expectsJson()) {
-            return response()->json(['conversation' => $conversation], $conversation->wasRecentlyCreated ? 201 : 200);
+            return response()->json(['conversation' => $this->conversationPayload($conversation)], $conversation->wasRecentlyCreated ? 201 : 200);
         }
 
         return redirect()->route('ai-chat.conversations.show', $conversation);
@@ -78,7 +79,7 @@ class AiChatConversationController extends Controller
         $this->authorize('view', $conversation);
         $conversation = $action($conversation);
         if ($request->expectsJson()) {
-            return response()->json(['conversation' => $conversation->only(['id', 'title', 'section_id']), 'messages' => $conversation->messages->map(fn ($m) => $m->only(['id', 'role', 'status', 'content', 'created_at']))]);
+            return response()->json(['conversation' => $this->conversationPayload($conversation), 'messages' => $conversation->messages->map(fn ($message) => $this->messagePayload($message))->values()]);
         }
 
         return view('ai-chat.show', compact('conversation'));
@@ -88,7 +89,7 @@ class AiChatConversationController extends Controller
     {
         $conversation = $action($conversation, $request->validated('title'));
         if ($request->expectsJson()) {
-            return response()->json(['conversation' => $conversation]);
+            return response()->json(['conversation' => $this->conversationPayload($conversation)]);
         }
 
         return redirect()->route('ai-chat.conversations.show', $conversation);
@@ -103,5 +104,15 @@ class AiChatConversationController extends Controller
         }
 
         return redirect()->route('ai-chat.index');
+    }
+
+    private function messagePayload(?AiChatMessage $message): ?array
+    {
+        return $message?->only(['id', 'role', 'status', 'content', 'created_at']);
+    }
+
+    private function conversationPayload(AiChatConversation $conversation): array
+    {
+        return $conversation->only(['id', 'title', 'section_id', 'created_at', 'last_message_at']);
     }
 }

@@ -10,6 +10,7 @@ use App\Exceptions\AiChat\GeminiApiException;
 use App\Exceptions\AiChat\GeminiApiKeyMissingException;
 use App\Http\Requests\AiChat\StoreMessageRequest;
 use App\Models\AiChatConversation;
+use App\Models\AiChatMessage;
 use App\UseCases\AiChatMessage\SendAction;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -32,14 +33,24 @@ class AiChatMessageController extends Controller
 
         $conversation->refresh();
         $payload = [
-            'user_message' => $conversation->messages()->where('role', 'user')->latest('created_at')->first(),
-            'assistant_message' => $assistant,
-            'conversation' => $conversation,
+            'user_message' => $this->messagePayload($conversation->messages()->where('role', 'user')->latest('created_at')->first()),
+            'assistant_message' => $this->messagePayload($assistant),
+            'conversation' => $this->conversationPayload($conversation),
         ];
         if ($request->expectsJson()) {
             return response()->json($payload);
         }
 
         return redirect()->route('ai-chat.conversations.show', $conversation);
+    }
+
+    private function messagePayload(?AiChatMessage $message): ?array
+    {
+        return $message?->only(['id', 'role', 'status', 'content', 'created_at']);
+    }
+
+    private function conversationPayload(AiChatConversation $conversation): array
+    {
+        return $conversation->only(['id', 'title', 'section_id', 'created_at', 'last_message_at']);
     }
 }
