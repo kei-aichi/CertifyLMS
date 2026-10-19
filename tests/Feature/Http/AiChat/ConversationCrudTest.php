@@ -187,13 +187,13 @@ class ConversationCrudTest extends TestCase
         config(['ai-chat.enabled' => true, 'ai-chat.gemini.api_key' => null]);
         $user = $this->student();
 
-        $response = $this->actingAs($user)->from(route('ai-chat.index'))->post(route('ai-chat.conversations.store'), [
+        $response = $this->actingAs($user)->from(route('ai-chat.index'))->followingRedirects()->post(route('ai-chat.conversations.store'), [
             'source' => 'full-screen', 'message' => '再入力する質問',
         ]);
 
-        $response->assertRedirect(route('ai-chat.index'))
-            ->assertSessionHas('error', 'AIチャットは現在利用できません。時間をおいて再度お試しください。')
-            ->assertSessionHasInput('message', '再入力する質問');
+        $response->assertOk()
+            ->assertSee('AIチャットは現在利用できません。時間をおいて再度お試しください。')
+            ->assertSee('再入力する質問');
         $this->assertDatabaseCount('ai_chat_conversations', 0);
         $this->assertDatabaseCount('ai_chat_messages', 0);
         $this->assertDatabaseCount('ai_chat_daily_usages', 0);
