@@ -45,12 +45,24 @@ class AiChatConversationController extends Controller
                 $conversation = $prepared['conversation'];
                 $assistant = $sendAction->sendReserved($request->user(), $conversation, $prepared['message']);
             } catch (AiChatPendingException $exception) {
+                if (! $request->expectsJson()) {
+                    return back()->withInput()->with('error', 'この会話は現在処理中です。完了後に再度お試しください。');
+                }
                 abort(409, 'この会話は現在処理中です。');
             } catch (AiChatDailyLimitExceededException $exception) {
+                if (! $request->expectsJson()) {
+                    return back()->withInput()->with('error', '本日のAIチャット利用上限に達しました。');
+                }
                 abort(429, '本日のAIチャット利用上限に達しました。');
             } catch (GeminiApiKeyMissingException $exception) {
+                if (! $request->expectsJson()) {
+                    return back()->withInput()->with('error', 'AIチャットは現在利用できません。時間をおいて再度お試しください。');
+                }
                 abort(503, 'AIチャットは現在利用できません。');
             } catch (GeminiApiException $exception) {
+                if (! $request->expectsJson()) {
+                    return back()->withInput()->with('error', 'AIの回答を取得できませんでした。質問は保存されています。時間をおいて再度お試しください。');
+                }
                 abort(502, 'AIサービスでエラーが発生しました。');
             }
             $conversation->refresh();
