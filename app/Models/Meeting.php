@@ -40,6 +40,9 @@ class Meeting extends Model
         'meeting_url_snapshot',
         'completed_at',
         'meeting_quota_transaction_id',
+        'google_connection_id',
+        'google_event_id',
+        'google_event_created_at',
     ];
 
     protected $casts = [
@@ -47,6 +50,7 @@ class Meeting extends Model
         'scheduled_at' => 'datetime',
         'canceled_at' => 'datetime',
         'completed_at' => 'datetime',
+        'google_event_created_at' => 'datetime',
     ];
 
     /**

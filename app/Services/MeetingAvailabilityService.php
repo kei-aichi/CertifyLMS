@@ -11,6 +11,7 @@ use App\Models\CoachAvailability;
 use App\Models\Meeting;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Log;
 
 /**
  * 担当コーチ集合の面談可能時間枠を 60 分単位で展開し、空きスロットを集計する Service。
@@ -21,6 +22,8 @@ use Illuminate\Support\Collection;
  */
 final class MeetingAvailabilityService
 {
+    public function __construct(private readonly GoogleCalendarService $googleCalendar) {}
+
     /**
      * 指定 Certification の担当コーチ集合について、指定日 1 日分の 60 分単位空きスロットを返す。
      *
@@ -61,6 +64,24 @@ final class MeetingAvailabilityService
         /** @var array<string, int> $slotCounts スロット開始時刻(H:i) → available coach 数 */
         $slotCounts = [];
 
+        $googleBusyByCoach = [];
+        foreach ($coaches as $coach) {
+            $credential = $coach->googleCredential;
+            if ($credential === null) {
+                continue;
+            }
+            try {
+                $googleBusyByCoach[$coach->id] = $this->googleCalendar->freeBusy($credential, $dayStart, $dayEnd);
+            } catch (\Throwable $exception) {
+                Log::warning('Google Calendar FreeBusy failed; using LMS availability.', [
+                    'operation' => 'freebusy',
+                    'coach_id' => $coach->id,
+                    'connection_id' => $credential->getKey(),
+                    'error_class' => $exception::class,
+                ]);
+            }
+        }
+
         foreach ($availabilities as $availability) {
             $slot = Carbon::parse($date->format('Y-m-d').' '.$availability->start_time);
             $end = Carbon::parse($date->format('Y-m-d').' '.$availability->end_time);
@@ -70,7 +91,12 @@ final class MeetingAvailabilityService
                 $coachId = $availability->coach_id;
                 $booked = $bookedByCoach[$coachId] ?? [];
 
-                if (! in_array($slotKey, $booked, true)) {
+                $slotEnd = $slot->copy()->addHour();
+                $busy = $googleBusyByCoach[$coachId] ?? [];
+                $googleBooked = collect($busy)->contains(fn (array $period): bool => $slot->lt($period['end']) && $slotEnd->gt($period['start'])
+                );
+
+                if (! in_array($slotKey, $booked, true) && ! $googleBooked) {
                     $slotCounts[$slotKey] = ($slotCounts[$slotKey] ?? 0) + 1;
                 }
 
