@@ -21,7 +21,7 @@ final class GeminiChatService
             throw new GeminiApiKeyMissingException('Gemini API key is not configured.');
         }
 
-        $model = (string) config('ai-chat.gemini.model', 'gemini-2.5-flash');
+        $model = (string) config('ai-chat.gemini.model', 'gemini-3.1-flash-lite');
         $url = "https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent";
         $maxRetries = max(0, (int) config('ai-chat.gemini.'.($forTitle ? 'title_max_retries' : 'max_retries'), $forTitle ? 0 : 2));
         $startedAt = microtime(true);

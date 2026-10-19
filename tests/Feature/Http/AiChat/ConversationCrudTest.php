@@ -172,7 +172,7 @@ class ConversationCrudTest extends TestCase
 
     public function test_initial_message_without_api_key_returns_503_without_persisting_anything(): void
     {
-        config(['ai-chat.enabled' => true]);
+        config(['ai-chat.enabled' => true, 'ai-chat.gemini.api_key' => null]);
         $user = $this->student();
         $this->actingAs($user)->postJson(route('ai-chat.conversations.store'), [
             'source' => 'widget', 'message' => '質問',
