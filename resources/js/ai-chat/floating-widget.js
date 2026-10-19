@@ -49,6 +49,7 @@ export function initAiChatWidget() {
     let lastFocus = null;
     let currentConversationId = null;
     let forceNewConversation = false;
+    let fullscreenTransitionInProgress = false;
     try {
         const savedConvId = sessionStorage.getItem(STORAGE_CONV);
         const savedSectionId = sessionStorage.getItem(STORAGE_CONV_SECTION);
@@ -333,11 +334,28 @@ export function initAiChatWidget() {
     // FAB / panel open / close
     fab.addEventListener('click', () => setOpen(true));
     closeBtn?.addEventListener('click', () => setOpen(false));
-    fullscreenBtn?.addEventListener('click', () => {
-        if (currentConversationId) {
-            window.location.href = `${fullscreenBase}/${currentConversationId}`;
-        } else {
-            window.location.href = '/ai-chat';
+    fullscreenBtn?.addEventListener('click', async () => {
+        // IDがまだない場合も、質問送信時と同じ経路でSection会話を解決してから遷移する。
+        // 連打によるConversation重複作成を防ぐため、解決中は追加リクエストを受け付けない。
+        if (fullscreenTransitionInProgress) return;
+
+        fullscreenTransitionInProgress = true;
+        fullscreenBtn.disabled = true;
+        try {
+            const convId = await ensureConversation();
+            window.location.href = `${fullscreenBase}/${convId}`;
+        } catch (err) {
+            const errorType = err?.status === 409
+                ? 'pending'
+                : err?.status === 429
+                    ? 'rate-limit'
+                    : err?.status === 503
+                        ? 'unavailable'
+                        : 'network';
+            appendAssistantBubble(describeError({ type: errorType }), { isError: true });
+        } finally {
+            fullscreenTransitionInProgress = false;
+            fullscreenBtn.disabled = false;
         }
     });
 
