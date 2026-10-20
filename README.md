@@ -249,7 +249,56 @@ Stripe Dashboardのサンドボックス環境で、Developers → API keysか�
 3. Stripe CLIにHTTP 200の転送結果が表示され、決済成功画面が表示されることを確認する。
 4. `payments`の`succeeded`、`meeting_quota_transactions`の`purchased`行、残面談回数を確認する。
 5. Stripe CLIの転送ログとアプリケーションログで署名エラー・照合不一致・一時障害を確認する。
-6. 同じイベントを再送し、購入取引が増えないことを確認する。
+
+#### WebhookイベントIDの確認と再送
+
+Webhookの再送確認では、決済に対応するイベントID（`evt_...`）を特定してから操作します。`stripe listen --forward-to`は、Stripeから届いたWebhookをローカルの`http://localhost:8000/webhooks/stripe`へ転送するための機能です。Dashboardに登録したWebhook Endpointへの再送とは別の経路であり、Dashboardから再送したイベントが必ずローカルのStripe CLIへ届くわけではありません。
+
+Dashboardで再送する場合は、Dashboardに登録済みのWebhook Endpointを対象に、サンドボックス環境で次を確認します。
+
+1. **Developers → Webhooks**を開く。
+2. 登録済みの対象Webhook Endpointを選び、その配信履歴から`checkout.session.completed`のイベントを選ぶ。
+3. イベント詳細に表示される`evt_...`の値を控える。Checkout Session ID（`cs_...`）やPaymentIntent ID（`pi_...`）とは別の値です。
+4. イベント詳細の**Resend / 再送**操作を選び、Dashboardに登録済みの対象Endpointへ再送する。
+5. 対象Endpointの配信結果がHTTP 200になることを確認する。
+
+Dashboardの表示名や配置はStripeの画面変更により異なる場合があります。再送操作が表示されない場合は、対象イベントの詳細画面からWebhook配信先と配信履歴を確認してください。現在のリポジトリでは、ローカルの`stripe listen`へイベントを再送するCLIコマンドは確認していないため、ローカル再送を実施できるとは記載しません。
+
+再送後は、次の3点を確認します。
+
+- `payments`で対象Paymentが`succeeded`のままであること。
+- `meeting_quota_transactions`で対象Paymentの`type=purchased`行が1件だけであること。再送前後で件数が増えないこと。
+- ダッシュボードまたは予約画面を再読み込みし、残面談回数が購入数量分だけで、再送によってさらに増えていないこと。
+
+Paymentの確認は、開発環境のphpMyAdmin（<http://localhost:8080>）で`payments`と`meeting_quota_transactions`を検索するか、アプリケーションログの秘密情報を含まない照合結果で行います。Webhook payload、署名secret、APIキー、カード情報はログやREADMEへ貼り付けません。
+
+#### `migrate` / `migrate:fresh --seed`後のStripe関連データ
+
+初期化が必要な開発環境では、既存の開発データが削除されることを確認したうえで、プロジェクトルートから次を実行します。
+
+```bash
+./vendor/bin/sail artisan migrate:fresh --seed
+```
+
+`PaymentSeeder`が実行されるため、Stripeへ実通信を行わないダミーのPaymentが投入されます。初期化後はphpMyAdminまたは次の確認用コマンドで、`payments`に`pending`・`succeeded`・`failed`の状態があり、`succeeded`のPaymentにだけ`purchased`取引があることを確認します。
+
+```bash
+./vendor/bin/sail artisan tinker --execute="echo App\\Models\\Payment::query()->select('status')->selectRaw('count(*) as count')->groupBy('status')->get();"
+```
+
+`succeeded`のPaymentに紐づく購入取引は、次の読み取り専用コマンドで確認します。`related_payment_id`がPayment IDと一致し、`type`が`purchased`の行が対象Paymentごとに1件で、`amount`がPaymentの`quantity`と一致することを確認します。
+
+```bash
+./vendor/bin/sail artisan tinker --execute="echo DB::table('payments')->join('meeting_quota_transactions', 'meeting_quota_transactions.related_payment_id', '=', 'payments.id')->where('payments.status', 'succeeded')->where('meeting_quota_transactions.type', 'purchased')->select('payments.id', 'payments.quantity', 'meeting_quota_transactions.related_payment_id', 'meeting_quota_transactions.amount')->selectRaw('count(meeting_quota_transactions.id) as purchased_transaction_count')->groupBy('payments.id', 'payments.quantity', 'meeting_quota_transactions.related_payment_id', 'meeting_quota_transactions.amount')->get();"
+```
+
+SeederのStripe IDはローカル確認用のダミー値です。Stripe APIへの照会やWebhook再送の対象にはしません。通常のマイグレーションだけを適用する場合は、既存データを保持する次のコマンドを使用します。
+
+```bash
+./vendor/bin/sail artisan migrate
+```
+
+`migrate:fresh --seed`は開発環境のデータを初期化するため、共有環境や本番環境では実行しないでください。
 
 一時障害ではWebhookがHTTP 500を返して再送対象になります。未払い・恒久的不一致はHTTP 200で受信し、加算しません。秘密鍵、Webhook secret、カード情報はREADMEやログへ記載しません。
 
