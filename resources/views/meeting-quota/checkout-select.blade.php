@@ -24,6 +24,12 @@
         <a href="{{ route('meeting-quota.history') }}" class="text-sm text-primary-700 hover:underline shrink-0 whitespace-nowrap">面談回数履歴 &rarr;</a>
     </div>
 
+    @if (session('error'))
+        <div class="mt-4 rounded-md border border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-800" role="alert">
+            {{ session('error') }}
+        </div>
+    @endif
+
     @if ($plans->isEmpty())
         <x-card class="mt-6" padding="none">
             <x-empty-state
