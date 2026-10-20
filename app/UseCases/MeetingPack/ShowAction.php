@@ -13,6 +13,10 @@ final class ShowAction
 {
     public function __invoke(MeetingPack $plan): MeetingPack
     {
-        return $plan->load(['createdBy', 'updatedBy']);
+        return $plan->load([
+            'createdBy',
+            'updatedBy',
+            'payments' => fn ($query) => $query->with('user')->latest()->limit(20),
+        ]);
     }
 }
