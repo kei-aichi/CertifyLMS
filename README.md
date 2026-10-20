@@ -233,15 +233,23 @@ Stripe CLIでWebhookをローカルへ転送します。
 
 ```bash
 stripe login
-stripe listen --forward-to localhost:8000/webhooks/stripe
+stripe listen \
+  --events checkout.session.completed,checkout.session.expired \
+  --forward-to http://localhost:8000/webhooks/stripe
 ```
 
-`stripe listen`が表示する`whsec_...`を`STRIPE_WEBHOOK_SECRET`へ設定します。本番Dashboardのsecretと混同せず、設定変更後はSailを再起動してください。
+Stripe Dashboardのサンドボックス環境で、Developers → API keysからテスト用Secret key（`sk_test_...`）を取得し、`STRIPE_SECRET`へ設定します。`stripe listen`が表示するWebhook secret（`whsec_...`）を`STRIPE_WEBHOOK_SECRET`へ設定します。本番Dashboardのsecretや`sk_live_...`とは混同せず、設定変更後は次を実行してください。
 
-1. 受講中のstudentで`/meeting-quota/checkout`を開き、StripeテストモードのカードでCheckoutを完了する。
-2. `payments`、`meeting_quota_transactions`の`purchased`行、残面談回数を確認する。
-3. Stripe CLIの転送ログとアプリケーションログで署名エラー・照合不一致・一時障害を確認する。
-4. 同じイベントを再送し、購入取引が増えないことを確認する。
+```bash
+./vendor/bin/sail artisan config:clear
+```
+
+1. 受講中のstudentで`/meeting-quota/checkout`を開く。
+2. [Stripe公式テストカード一覧](https://docs.stripe.com/testing#cards)のカード番号でCheckoutを完了する。
+3. Stripe CLIにHTTP 200の転送結果が表示され、決済成功画面が表示されることを確認する。
+4. `payments`の`succeeded`、`meeting_quota_transactions`の`purchased`行、残面談回数を確認する。
+5. Stripe CLIの転送ログとアプリケーションログで署名エラー・照合不一致・一時障害を確認する。
+6. 同じイベントを再送し、購入取引が増えないことを確認する。
 
 一時障害ではWebhookがHTTP 500を返して再送対象になります。未払い・恒久的不一致はHTTP 200で受信し、加算しません。秘密鍵、Webhook secret、カード情報はREADMEやログへ記載しません。
 
