@@ -7,6 +7,7 @@ use App\Http\Controllers\AiChatMessageController;
 use App\Http\Controllers\AnnouncementController;
 use App\Http\Controllers\Auth\OnboardingController;
 use App\Http\Controllers\BrowseController;
+use App\Http\Controllers\CertificateController;
 use App\Http\Controllers\CertificationCatalogController;
 use App\Http\Controllers\CertificationCategoryController;
 use App\Http\Controllers\CertificationCoachAssignmentController;
@@ -23,10 +24,9 @@ use App\Http\Controllers\InvitationController;
 use App\Http\Controllers\LearningHourTargetController;
 use App\Http\Controllers\MeetingController;
 use App\Http\Controllers\MeetingPackController;
-use App\Http\Controllers\MeetingQuotaHistoryController;
 use App\Http\Controllers\MeetingQuotaCheckoutController;
 use App\Http\Controllers\MeetingQuotaCheckoutSuccessController;
-use App\Http\Controllers\StripeWebhookController;
+use App\Http\Controllers\MeetingQuotaHistoryController;
 use App\Http\Controllers\MockExamAnswerController;
 use App\Http\Controllers\MockExamCatalogController;
 use App\Http\Controllers\MockExamController;
@@ -53,6 +53,7 @@ use App\Http\Controllers\Settings\AvailabilityController as SettingsAvailability
 use App\Http\Controllers\Settings\GoogleCalendarController;
 use App\Http\Controllers\Settings\ProfileController;
 use App\Http\Controllers\Settings\SettingsDefaultEnrollmentController;
+use App\Http\Controllers\StripeWebhookController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\WeakDrillController;
 use App\Http\Controllers\WeakDrillResultController;
@@ -86,6 +87,8 @@ Route::middleware('auth')->group(function () {
 
     Route::get('notifications', [NotificationController::class, 'index'])->name('notifications.index');
     Route::get('notifications/{notification}', [NotificationController::class, 'show'])->name('notifications.show');
+    Route::get('certificates/{certificate}/download', [CertificateController::class, 'download'])
+        ->name('certificates.download');
     Route::post('notifications/read-all', [NotificationController::class, 'markAllAsRead'])->name('notifications.markAllAsRead');
     Route::post('notifications/{notification}/read', [NotificationController::class, 'markAsRead'])->name('notifications.markAsRead');
 
