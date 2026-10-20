@@ -222,4 +222,33 @@ class MeetingQuotaCheckoutTest extends TestCase
             ->assertSee('決済結果を確認しています')
             ->assertDontSee('お支払いが完了しました');
     }
+
+    public function test_success_screen_uses_payment_snapshot_after_pack_is_deleted(): void
+    {
+        $student = User::factory()->student()->create();
+        $pack = MeetingPack::factory()->published()->create(['name' => '購入時パック', 'price' => 500, 'meeting_count' => 3]);
+        $payment = Payment::factory()->create([
+            'user_id' => $student->id,
+            'meeting_pack_id' => $pack->id,
+            'meeting_pack_name_snapshot' => '購入時パック',
+            'amount' => 500,
+            'quantity' => 3,
+        ]);
+        $pack->delete();
+        $session = Session::constructFrom([
+            'id' => 'cs_snapshot_screen', 'mode' => 'payment', 'payment_status' => 'paid',
+            'amount_total' => 500, 'currency' => 'jpy', 'client_reference_id' => $payment->id,
+            'payment_intent' => 'pi_snapshot_screen', 'metadata' => ['payment_id' => $payment->id],
+        ]);
+        $mock = Mockery::mock(StripeCheckoutClient::class);
+        $mock->shouldReceive('retrieveCheckoutSession')->once()->andReturn($session);
+        $this->app->instance(StripeCheckoutClient::class, $mock);
+
+        $this->actingAs($student)->get(route('meeting-quota.checkout.success', [
+            'payment' => $payment->id, 'session_id' => $session->id,
+        ]))->assertOk()->assertViewIs('meeting-quota.success')
+            ->assertSee('購入時パック')
+            ->assertSee('¥500')
+            ->assertSee('3 回');
+    }
 }

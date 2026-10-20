@@ -228,6 +228,9 @@ STRIPE_WEBHOOK_SECRET=whsec_...
 
 Stripe CLIでWebhookをローカルへ転送します。
 
+- [Stripe CLI公式インストール手順](https://docs.stripe.com/stripe-cli)
+- [Stripeテストカード公式一覧](https://docs.stripe.com/testing#cards)
+
 ```bash
 stripe login
 stripe listen --forward-to localhost:8000/webhooks/stripe
