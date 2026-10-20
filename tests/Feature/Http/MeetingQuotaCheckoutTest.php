@@ -9,6 +9,7 @@ use App\Models\MeetingPack;
 use App\Models\Payment;
 use App\Models\User;
 use App\Services\Stripe\StripeCheckoutClient;
+use App\Exceptions\MeetingQuota\CheckoutFulfillmentException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Event;
 use Mockery;
@@ -207,8 +208,13 @@ class MeetingQuotaCheckoutTest extends TestCase
     public function test_success_entry_requires_valid_identifiers_and_never_shows_completed(): void
     {
         $student = User::factory()->student()->create();
-        $response = $this->actingAs($student)->get(route('meeting-quota.checkout.success', [
-            'payment' => '01ARZ3NDEKTSV4RRFFQ69G5FAA',
+        $payment = Payment::factory()->create(['user_id' => $student->id]);
+        $mock = Mockery::mock(StripeCheckoutClient::class);
+        $mock->shouldReceive('retrieveCheckoutSession')->once()->andThrow(CheckoutFulfillmentException::retryable());
+        $this->app->instance(StripeCheckoutClient::class, $mock);
+        $this->actingAs($student);
+        $response = $this->get(route('meeting-quota.checkout.success', [
+            'payment' => $payment->id,
             'session_id' => 'cs_test_pending',
         ]));
 

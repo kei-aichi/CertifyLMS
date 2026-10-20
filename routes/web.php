@@ -24,6 +24,7 @@ use App\Http\Controllers\MeetingPackController;
 use App\Http\Controllers\MeetingQuotaHistoryController;
 use App\Http\Controllers\MeetingQuotaCheckoutController;
 use App\Http\Controllers\MeetingQuotaCheckoutSuccessController;
+use App\Http\Controllers\StripeWebhookController;
 use App\Http\Controllers\MockExamAnswerController;
 use App\Http\Controllers\MockExamCatalogController;
 use App\Http\Controllers\MockExamController;
@@ -552,6 +553,8 @@ Route::middleware(['auth', 'role:student', 'active-learning'])->prefix('meeting-
     // 面談回数履歴
     Route::get('history', [MeetingQuotaHistoryController::class, 'index'])->name('history');
 });
+
+Route::post('webhooks/stripe', StripeWebhookController::class)->name('webhooks.stripe');
 
 // ============================================================
 // 開発専用: 共通コンポーネントショーケース(APP_ENV=local のみ表示)

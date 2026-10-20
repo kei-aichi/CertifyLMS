@@ -219,7 +219,28 @@ Google Calendar側でイベント作成が成功していても、通信断・�
 
 #### Gemini・Stripeについて
 
-Advanceの外部API対象にはGemini・Stripeも含まれますが、現時点のこのリポジトリではS-A-01のGoogle Calendar連携以外に、GeminiまたはStripe用の実装・環境変数設定は確認できません。未実装機能のAPIキー名やセットアップ手順はREADMEへ追加しません。新しい実装で環境変数が必要になった場合は、`.env.example`とREADMEへ同時に追記してください。
+Stripe Checkout（S-A-03）のローカル確認では、`.env`へテストモードの秘密値を設定します。秘密値はGit管理対象へ追加しません。
+
+```dotenv
+STRIPE_SECRET=sk_test_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+```
+
+Stripe CLIでWebhookをローカルへ転送します。
+
+```bash
+stripe login
+stripe listen --forward-to localhost:8000/webhooks/stripe
+```
+
+`stripe listen`が表示する`whsec_...`を`STRIPE_WEBHOOK_SECRET`へ設定します。本番Dashboardのsecretと混同せず、設定変更後はSailを再起動してください。
+
+1. 受講中のstudentで`/meeting-quota/checkout`を開き、StripeテストモードのカードでCheckoutを完了する。
+2. `payments`、`meeting_quota_transactions`の`purchased`行、残面談回数を確認する。
+3. Stripe CLIの転送ログとアプリケーションログで署名エラー・照合不一致・一時障害を確認する。
+4. 同じイベントを再送し、購入取引が増えないことを確認する。
+
+一時障害ではWebhookがHTTP 500を返して再送対象になります。未払い・恒久的不一致はHTTP 200で受信し、加算しません。秘密鍵、Webhook secret、カード情報はREADMEやログへ記載しません。
 
 > 本サービスは**招待制**です。公開の会員登録画面はありません。新規ユーザーを作るには、管理者でログイン → ユーザー管理から招待 → Mailpit で招待メールの URL を開く → オンボーディング登録、という流れになります。
 
