@@ -1,6 +1,6 @@
 {{--
     メッセージ 1 件分の吹き出し（$message を受け取る）。
-    構成: アバター + 吹き出し本体（本文 / 応答待ちのローディングドット / エラー文）+ メタ行（時刻・応答時間・トークン数）。
+    構成: アバター + 吹き出し本体（本文 / 応答待ちのローディングドット / エラー文）+ 時刻。
     フロント観点: 自分の発言と AI の発言で左右と配色を出し分け。AI 文は素の JS が Markdown をサニタイズ済 HTML に変換して描画。応答待ちはアニメーションのドット表示。
 --}}
 @php
@@ -72,12 +72,6 @@
                 {{ $message->updated_at?->format('H:i') }} · エラー
             @elseif (! $isMe && $message->status === \App\Enums\AiChatMessageStatus::Completed)
                 {{ $message->created_at?->format('H:i') }}
-                @if ($message->response_time_ms)
-                    · {{ number_format($message->response_time_ms / 1000, 1) }} s
-                @endif
-                @if ($message->output_tokens)
-                    · {{ number_format($message->output_tokens) }} tokens
-                @endif
             @else
                 {{ $message->created_at?->format('H:i') }}
             @endif

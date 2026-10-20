@@ -217,9 +217,158 @@ Google Calendar側でイベント作成が成功していても、通信断・�
 
 実Googleのトークン失効や権限変更を再現する場合は、テスト用Googleアカウントを使用してください。アクセストークン、リフレッシュトークン、クライアントシークレットをIssue、README、コミット、画面共有、ログへ貼り付けないでください。
 
+### Gemini AIチャット（S-A-02）
+
+Gemini APIを利用した学習相談機能です。学習中（`in_progress`）の`student`のみ利用できます。`coach`、`admin`、卒業・退会・招待中の受講生は利用できません。
+
+- フル画面チャット：`http://localhost:8000/ai-chat`
+- Widget：学習画面の右下に表示（AIチャット機能が有効な学習中studentのみ）
+- Section画面から開始した相談は、Sectionと資格のコンテキストをAIへ渡します
+- 同じSectionの会話は再利用されます
+- Widgetの「新しい相談」を選ぶと、新しいConversationを作成します
+- 送信上限は初期値20回/日です
+
+#### 1. Gemini APIキーの取得
+
+1. [Google AI Studio](https://aistudio.google.com/)へGoogleアカウントでログインします。
+2. APIキー管理画面から開発用APIキーを作成します。画面名や導線はGoogle側の変更により異なる場合があります。
+3. APIキーの利用制限・利用可能モデル・請求設定は、利用するGoogleプロジェクトの設定に従ってください。
+
+APIキーの実値は、README、Issue、Git、画面共有、ログへ記載しないでください。
+
+#### 2. `.env`の設定
+
+共通の[環境構築手順](#環境構築手順)で`.env`を作成した後、次を設定します。
+
+```dotenv
+AI_CHAT_ENABLED=true
+AI_CHAT_DAILY_LIMIT=20
+AI_CHAT_AUTO_TITLE_ENABLED=true
+AI_CHAT_PENDING_TIMEOUT_SECONDS=120
+GEMINI_API_KEY=ここにAPIキーを設定
+GEMINI_MODEL=gemini-3.1-flash-lite
+GEMINI_CONNECT_TIMEOUT=10
+GEMINI_TIMEOUT=30
+GEMINI_MAX_RETRIES=2
+GEMINI_TITLE_TIMEOUT=10
+GEMINI_TITLE_MAX_RETRIES=0
+```
+
+| 変数 | 用途 | 初期値 |
+|---|---|---:|
+| `AI_CHAT_ENABLED` | AIチャット機能のON/OFF | `false` |
+| `AI_CHAT_DAILY_LIMIT` | 受講生1人あたりの日次送信上限 | `20` |
+| `AI_CHAT_AUTO_TITLE_ENABLED` | 初回成功時の自動タイトル生成 | `true` |
+| `AI_CHAT_PENDING_TIMEOUT_SECONDS` | stale pendingと判定する経過秒数 | `120` |
+| `GEMINI_API_KEY` | Gemini API認証キー | なし |
+| `GEMINI_MODEL` | 使用するGeminiモデル | `gemini-3.1-flash-lite` |
+| `GEMINI_CONNECT_TIMEOUT` | API接続タイムアウト（秒） | `10` |
+| `GEMINI_TIMEOUT` | APIリクエストタイムアウト（秒） | `30` |
+| `GEMINI_MAX_RETRIES` | 一時エラー時の最大再試行回数 | `2` |
+| `GEMINI_TITLE_TIMEOUT` | 自動タイトル生成のタイムアウト（秒） | `10` |
+| `GEMINI_TITLE_MAX_RETRIES` | 自動タイトル生成の最大再試行回数 | `0` |
+
+`GEMINI_MODEL`は環境変数で変更できます。利用可能なモデルはAPIキーとGoogle側の提供状況に依存します。現在の既定値は`gemini-3.1-flash-lite`です。
+
+#### 3. 設定の反映
+
+`.env`を変更した場合は、プロジェクトルートで次を実行します。
+
+```bash
+./vendor/bin/sail artisan config:clear
+```
+
+設定キャッシュを利用する環境では、必要に応じて次も実行します。
+
+```bash
+./vendor/bin/sail artisan config:cache
+```
+
+Sailが起動していない場合は、先に共通手順どおり起動します。
+
+```bash
+./vendor/bin/sail up -d
+```
+
+#### 4. DBと初期データ
+
+新規、または破棄してよい開発DBでは、共通の初期化手順を実行します。
+
+```bash
+./vendor/bin/sail artisan migrate:fresh --seed
+```
+
+`migrate:fresh`は既存テーブルとデータを削除するため、既存データを保持する環境では実行しないでください。
+
+既存DBでは、データを保持するため通常のMigrationを実行します。
+
+```bash
+./vendor/bin/sail artisan migrate
+```
+
+AIチャット確認用データだけを追加する場合は、固定studentと対象Sectionが存在することを確認したうえで、次を実行します。
+
+```bash
+./vendor/bin/sail artisan db:seed --class='Database\\Seeders\\AiChatSeeder'
+```
+
+`AiChatSeeder`は`local`または`testing`環境以外では実行されません。固定student（`student@certify-lms.test`）または対象Sectionが存在しない場合は警告して終了します。既存Conversationを無制限に増やさず、Gemini APIやDailyUsageを使用しません。
+
+`DatabaseSeeder`では、User・Enrollment・Content投入後に`AiChatSeeder`が呼び出されます。
+
+#### 5. ログインと利用確認
+
+共通の[ログインアカウント](#ログインアカウント)にある受講生でログインします。
+
+```text
+メールアドレス：student@certify-lms.test
+パスワード：password
+```
+
+正常系の確認手順：
+
+1. `http://localhost:8000`へアクセスしてログインする。
+2. `http://localhost:8000/ai-chat`を開く。
+3. Conversationを作成し、短い質問を送信する。
+4. 日本語のassistant回答が表示されることを確認する。
+5. ページを再読み込みし、質問と回答が保存・再表示されることを確認する。
+6. Section画面を開き、右下のWidgetから質問を送信する。
+7. Widgetから全画面へ遷移し、Section情報が維持されることを確認する。
+8. 同じSectionで再度相談し、既存Conversationが再利用されることを確認する。
+9. Widgetの「新しい相談」を選び、同じSectionでも新しいConversationが作成されることを確認する。
+10. 初回成功後にConversationタイトルが自動生成されることを確認する。
+
+#### 6. 日次制限・エラー時の挙動
+
+- 日次送信回数は`ai_chat_daily_usages`で管理し、初期上限は20回です。
+- JSTの日付単位で集計され、Conversationを削除しても利用回数は減りません。
+- Gemini API失敗時も質問とassistant errorは履歴へ保存され、利用回数は戻りません。
+- APIキー未設定時は503相当の利用不可案内となり、送信予約は保存されません。
+- 日次上限超過時は429相当の案内となり、新しい送信は保存されません。
+
+#### 7. よくある問題
+
+| 症状 | 確認内容 |
+|---|---|
+| `/ai-chat`が404になる | `AI_CHAT_ENABLED=true`、設定キャッシュ、ログイン中ユーザーがstudentで`in_progress`かを確認する |
+| APIキー未設定の案内が表示される | `.env`の`GEMINI_API_KEY`を確認し、`./vendor/bin/sail artisan config:clear`を実行する |
+| Gemini APIが404になる | `GEMINI_MODEL`がAPIキーで利用可能か、Google AI Studio側のモデル提供状況を確認する |
+| Gemini APIが429になる | Google側のAPI利用制限と、アプリ側の`AI_CHAT_DAILY_LIMIT`を確認する |
+| 回答は保存されたがタイトルが変わらない | afterResponseの実行環境とPHP-FPM/Webサーバー/プロキシのtimeoutを確認する |
+| Widgetが表示されない | `AI_CHAT_ENABLED=true`、studentロール、`in_progress`状態、AIチャット画面以外であることを確認する |
+
+AIタイトル生成はHTTPレスポンス送信後のLaravel `afterResponse`で実行されます。Queue Workerではないため、実行環境のtimeoutやプロセス終了によりタイトル生成が完了しない場合があります。その場合も回答済みのConversationとMessageは保持されます。
+
+#### APIキーの安全管理
+
+- APIキーをREADME、Issue、Git、画面共有、チャット、ログへ貼り付けない。
+- `.env`はGitへコミットしない。
+- APIキーをコマンド引数やデバッグ出力へ直接記載しない。
+- 漏えいした可能性がある場合は、Google側でキーを無効化・再発行する。
+
 #### Gemini・Stripeについて
 
-Advanceの外部API対象にはGemini・Stripeも含まれますが、現時点のこのリポジトリではS-A-01のGoogle Calendar連携以外に、GeminiまたはStripe用の実装・環境変数設定は確認できません。未実装機能のAPIキー名やセットアップ手順はREADMEへ追加しません。新しい実装で環境変数が必要になった場合は、`.env.example`とREADMEへ同時に追記してください。
+Advanceの外部API対象にはGemini・Stripeも含まれます。Gemini AIチャットは本節の手順で設定できます。Stripe連携は本チケットの対象外です。
 
 > 本サービスは**招待制**です。公開の会員登録画面はありません。新規ユーザーを作るには、管理者でログイン → ユーザー管理から招待 → Mailpit で招待メールの URL を開く → オンボーディング登録、という流れになります。
 
@@ -481,5 +630,13 @@ sail bin pint --test     # 整形漏れの確認（CI 相当のチェック）
 `.env.example` をコピーするだけで、すべての機能がローカルで動作します（メールは Mailpit に配信されます）。
 
 - `PUSHER_*` — チャットのリアルタイム配信に使用します。有効にする場合は Pusher のキーを取得して設定し、`BROADCAST_DRIVER=pusher` に変更してください。未設定（既定の `BROADCAST_DRIVER=log`）でもメッセージの送受信自体は動作し、相手画面へのリアルタイム反映のみ行われません
+- `AI_CHAT_ENABLED` — Gemini AI チャットボットの機能スイッチです（既定値 `false`）。
+- `AI_CHAT_DAILY_LIMIT` — 受講生1人あたりの1日送信上限です（既定値 `20`）。
+- `AI_CHAT_AUTO_TITLE_ENABLED` — 会話タイトルの自動生成を有効にします（既定値 `true`）。
+- `AI_CHAT_PENDING_TIMEOUT_SECONDS` — 送信処理中（pending）をstaleと判定して復旧対象にする経過秒数です（既定値 `120` 秒。stale pending復旧は実装済み）。
+- `GEMINI_API_KEY`、`GEMINI_MODEL`、`GEMINI_CONNECT_TIMEOUT`、`GEMINI_TIMEOUT`、`GEMINI_MAX_RETRIES` — Gemini API連携の認証、モデル、タイムアウト、再試行設定です。
+- `GEMINI_TITLE_TIMEOUT`、`GEMINI_TITLE_MAX_RETRIES` — afterResponseで実行する自動タイトル生成用のtimeout・再試行設定です。タイトル生成は補助処理のため、既定値は10秒・0回です。
+
+AIチャットの自動タイトル生成はHTTPレスポンス送信後のLaravel afterResponseで実行します。afterResponseはQueue Workerではないため、PHP-FPM・Webサーバー・プロキシのtimeoutやプロセス終了によりタイトル生成が完了しない場合があります。その場合も回答済みの会話・メッセージは保持され、タイトルは既存値のままです。
 
 新しい環境変数やセットアップ手順を追加した場合は、`.env.example` と本 README に追記し、チームの誰でも環境を再現できる状態を保ってください。
