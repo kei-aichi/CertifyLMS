@@ -18,7 +18,7 @@
         <div>
             <h1 class="text-2xl font-bold text-ink-900">追加面談の購入</h1>
             <p class="text-sm text-ink-500 mt-1">
-                希望のパックを選んで決済画面へ進んでください。決済完了で残面談回数が即時加算されます。
+                希望のパックを選んで決済画面へ進んでください。決済確定後、残面談回数へ反映されます。反映までに時間がかかる場合があります。
             </p>
         </div>
         <a href="{{ route('meeting-quota.history') }}" class="text-sm text-primary-700 hover:underline shrink-0 whitespace-nowrap">面談回数履歴 &rarr;</a>

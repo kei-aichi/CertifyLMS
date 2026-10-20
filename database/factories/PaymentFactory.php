@@ -37,4 +37,14 @@ class PaymentFactory extends Factory
     {
         return $this->state(fn () => ['status' => PaymentStatus::Succeeded->value]);
     }
+
+    public function failed(): static
+    {
+        return $this->state(fn () => ['status' => PaymentStatus::Failed->value, 'failed_at' => now()]);
+    }
+
+    public function refunded(): static
+    {
+        return $this->state(fn () => ['status' => PaymentStatus::Refunded->value]);
+    }
 }
