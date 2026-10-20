@@ -1,0 +1,130 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Http\Controllers;
+
+use App\Exceptions\AiChat\AiChatDailyLimitExceededException;
+use App\Exceptions\AiChat\AiChatPendingException;
+use App\Exceptions\AiChat\GeminiApiException;
+use App\Exceptions\AiChat\GeminiApiKeyMissingException;
+use App\Http\Requests\AiChat\StoreConversationRequest;
+use App\Http\Requests\AiChat\UpdateConversationRequest;
+use App\Models\AiChatConversation;
+use App\Models\AiChatMessage;
+use App\UseCases\AiChatConversation\DestroyAction;
+use App\UseCases\AiChatConversation\IndexAction;
+use App\UseCases\AiChatConversation\ShowAction;
+use App\UseCases\AiChatConversation\StoreAction;
+use App\UseCases\AiChatConversation\StoreAndReserveAction;
+use App\UseCases\AiChatConversation\UpdateAction;
+use App\UseCases\AiChatMessage\SendAction as SendMessageAction;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Illuminate\View\View;
+
+class AiChatConversationController extends Controller
+{
+    public function index(Request $request, IndexAction $action): RedirectResponse|View
+    {
+        $this->authorize('viewAny', AiChatConversation::class);
+        $conversations = $action($request->user());
+
+        return $conversations->isEmpty() ? view('ai-chat.empty-state') : redirect()->route('ai-chat.conversations.show', $conversations->first());
+    }
+
+    public function store(StoreConversationRequest $request, StoreAction $action, SendMessageAction $sendAction, StoreAndReserveAction $storeAndReserve): JsonResponse|RedirectResponse
+    {
+        $data = $request->validated();
+        $initialMessage = $data['message'] ?? null;
+        unset($data['message']);
+        if ($initialMessage !== null && $initialMessage !== '') {
+            try {
+                $prepared = $storeAndReserve($request->user(), $data, $initialMessage);
+                $conversation = $prepared['conversation'];
+                $assistant = $sendAction->sendReserved($request->user(), $conversation, $prepared['message']);
+            } catch (AiChatPendingException $exception) {
+                if (! $request->expectsJson()) {
+                    return back()->withInput()->with('error', 'この会話は現在処理中です。完了後に再度お試しください。');
+                }
+                abort(409, 'この会話は現在処理中です。');
+            } catch (AiChatDailyLimitExceededException $exception) {
+                if (! $request->expectsJson()) {
+                    return back()->withInput()->with('error', '本日のAIチャット利用上限に達しました。');
+                }
+                abort(429, '本日のAIチャット利用上限に達しました。');
+            } catch (GeminiApiKeyMissingException $exception) {
+                if (! $request->expectsJson()) {
+                    return back()->withInput()->with('error', 'AIチャットは現在利用できません。時間をおいて再度お試しください。');
+                }
+                abort(503, 'AIチャットは現在利用できません。');
+            } catch (GeminiApiException $exception) {
+                if (! $request->expectsJson()) {
+                    return back()->withInput()->with('error', 'AIの回答を取得できませんでした。質問は保存されています。時間をおいて再度お試しください。');
+                }
+                abort(502, 'AIサービスでエラーが発生しました。');
+            }
+            $conversation->refresh();
+            $payload = [
+                'user_message' => $this->messagePayload($conversation->messages()->where('role', 'user')->latest('created_at')->first()),
+                'assistant_message' => $this->messagePayload($assistant),
+                'conversation' => $this->conversationPayload($conversation),
+            ];
+            if ($request->expectsJson()) {
+                return response()->json($payload, 200);
+            }
+
+            return redirect()->route('ai-chat.conversations.show', $conversation);
+        }
+
+        $conversation = $action($request->user(), $data);
+        if ($request->expectsJson()) {
+            return response()->json(['conversation' => $this->conversationPayload($conversation)], $conversation->wasRecentlyCreated ? 201 : 200);
+        }
+
+        return redirect()->route('ai-chat.conversations.show', $conversation);
+    }
+
+    public function show(Request $request, AiChatConversation $conversation, ShowAction $action): JsonResponse|View
+    {
+        $this->authorize('view', $conversation);
+        $conversation = $action($conversation);
+        if ($request->expectsJson()) {
+            return response()->json(['conversation' => $this->conversationPayload($conversation), 'messages' => $conversation->messages->map(fn ($message) => $this->messagePayload($message))->values()]);
+        }
+
+        return view('ai-chat.show', compact('conversation'));
+    }
+
+    public function update(UpdateConversationRequest $request, AiChatConversation $conversation, UpdateAction $action): JsonResponse|RedirectResponse
+    {
+        $conversation = $action($conversation, $request->validated('title'));
+        if ($request->expectsJson()) {
+            return response()->json(['conversation' => $this->conversationPayload($conversation)]);
+        }
+
+        return redirect()->route('ai-chat.conversations.show', $conversation);
+    }
+
+    public function destroy(Request $request, AiChatConversation $conversation, DestroyAction $action): JsonResponse|RedirectResponse
+    {
+        $this->authorize('delete', $conversation);
+        $action($conversation);
+        if ($request->expectsJson()) {
+            return response()->json([], 204);
+        }
+
+        return redirect()->route('ai-chat.index');
+    }
+
+    private function messagePayload(?AiChatMessage $message): ?array
+    {
+        return $message?->only(['id', 'role', 'status', 'content', 'created_at']);
+    }
+
+    private function conversationPayload(AiChatConversation $conversation): array
+    {
+        return $conversation->only(['id', 'title', 'section_id', 'created_at', 'last_message_at']);
+    }
+}

@@ -33,7 +33,9 @@ export class AiChatClient {
             return;
         }
 
-        const response = await fetch(this.storeUrl, {
+        let response;
+        try {
+            response = await fetch(this.storeUrl, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -43,8 +45,16 @@ export class AiChatClient {
             },
             credentials: 'same-origin',
             body: JSON.stringify({ content }),
-        });
+            });
+        } catch (error) {
+            this.onError({ type: 'network' });
+            return;
+        }
 
+        if (response.status === 409) {
+            this.onError({ type: 'pending', status: 409 });
+            return;
+        }
         if (response.status === 429) {
             this.onError({ type: 'rate-limit', status: 429 });
             return;
@@ -59,12 +69,24 @@ export class AiChatClient {
             this.onError({ type: 'llm', status: 502, upstreamStatus: payload?.upstream_status ?? null, payload });
             return;
         }
+        if (response.status === 503) {
+            this.onError({ type: 'unavailable', status: 503 });
+            return;
+        }
+        if (response.status === 403 || response.status === 404) {
+            this.onError({ type: 'forbidden', status: response.status });
+            return;
+        }
         if (!response.ok) {
             this.onError({ type: 'http', status: response.status });
             return;
         }
 
-        const data = await response.json();
+        const data = await response.json().catch(() => null);
+        if (!data || !data.user_message || !data.assistant_message) {
+            this.onError({ type: 'invalid-response' });
+            return;
+        }
         this.onUserMessage(data.user_message);
         this.onAssistantMessage(data.assistant_message);
         if (data.conversation) {

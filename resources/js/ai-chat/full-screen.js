@@ -142,7 +142,10 @@ function initForm() {
 }
 
 function describeError(err) {
+    if (err.type === 'pending') return 'この会話は現在処理中です。完了後に再度お試しください。';
     if (err.type === 'rate-limit') return '本日の利用上限に達しました。明日 0:00 以降に再度ご利用ください。';
+    if (err.type === 'unavailable') return 'AIチャットは現在利用できません。時間をおいて再度お試しください。';
+    if (err.type === 'forbidden') return 'この会話を利用する権限がありません。';
     if (err.type === 'validation') return '入力内容を確認してください (1-2000 文字)。';
     if (err.type === 'llm') {
         const upstream = err.upstreamStatus;
@@ -154,6 +157,7 @@ function describeError(err) {
         }
         return 'AI が応答できませんでした。しばらく時間をおいて再試行してください。';
     }
+    if (err.type === 'network') return '通信に失敗しました。時間をおいて再度お試しください。';
     return '送信に失敗しました。時間をおいて再度お試しください。';
 }
 
