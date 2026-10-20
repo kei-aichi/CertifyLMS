@@ -77,6 +77,12 @@ class MeetingQuotaTransaction extends Model
         return $this->belongsTo($paymentClass, 'related_payment_id');
     }
 
+    /** @return BelongsTo<Payment, $this> */
+    public function payment(): BelongsTo
+    {
+        return $this->belongsTo(Payment::class, 'related_payment_id');
+    }
+
     /**
      * @return BelongsTo<User, $this>
      */

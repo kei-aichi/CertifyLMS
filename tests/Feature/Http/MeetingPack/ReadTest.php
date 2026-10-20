@@ -33,7 +33,7 @@ class ReadTest extends TestCase
         $response = $this->get(route('admin.meeting-packs.index'))->assertOk()
             ->assertViewIs('meeting-pack.management.index');
         $this->assertSame(3, $response->viewData('plans')->total());
-        $this->assertFalse(class_exists('App\\Models\\Payment'));
+        $this->assertTrue(class_exists('App\\Models\\Payment'));
         $this->assertSame(3, preg_match_all('/>0 件<\/span>/', $response->getContent()));
     }
 
