@@ -15,6 +15,7 @@ use App\Models\Enrollment;
 use App\Models\EnrollmentGoal;
 use App\Models\EnrollmentStatusLog;
 use App\Models\User;
+use App\Services\CertificatePdfService;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Carbon;
@@ -230,32 +231,36 @@ final class EnrollmentSeeder extends Seeder
                 continue;
             }
 
-            $factory = Enrollment::factory()->for($student)->for($certification);
-            $factory = match ($pattern['state']) {
-                'learning' => $factory->learning(),
-                'passed' => $factory->passed(),
-                'failed' => $factory->failed(),
-            };
-            if (! empty($pattern['mockPractice'])) {
-                $factory = $factory->mockPractice();
-            }
-            if ($pattern['examDays'] === null) {
-                $factory = $factory->withoutExamDate();
-            }
-
             $passedAt = $pattern['state'] === 'passed' ? now()->subDays(7) : null;
+            $status = match ($pattern['state']) {
+                'passed' => EnrollmentStatus::Passed->value,
+                'failed' => EnrollmentStatus::Failed->value,
+                default => EnrollmentStatus::Learning->value,
+            };
 
-            $enrollment = $factory->create([
-                'exam_date' => $pattern['examDays'] === null
-                    ? null
-                    : now()->addDays($pattern['examDays'])->toDateString(),
-                'passed_at' => $passedAt,
-            ]);
+            $enrollment = Enrollment::firstOrCreate(
+                [
+                    'user_id' => $student->id,
+                    'certification_id' => $certification->id,
+                ],
+                [
+                    'status' => $status,
+                    'current_term' => ! empty($pattern['mockPractice'])
+                        ? TermType::MockPractice->value
+                        : TermType::BasicLearning->value,
+                    'exam_date' => $pattern['examDays'] === null
+                        ? null
+                        : now()->addDays($pattern['examDays'])->toDateString(),
+                    'passed_at' => $passedAt,
+                ],
+            );
 
-            $this->seedStatusLogs($enrollment, $pattern['state'], $student);
+            if ($enrollment->wasRecentlyCreated) {
+                $this->seedStatusLogs($enrollment, $pattern['state'], $student);
 
-            if ($pattern['state'] === 'passed') {
-                $this->issueCertificate($enrollment, $passedAt);
+                if ($pattern['state'] === 'passed') {
+                    $this->issueCertificate($enrollment, $passedAt);
+                }
             }
         }
     }
@@ -307,5 +312,7 @@ final class EnrollmentSeeder extends Seeder
             ->create([
                 'issued_at' => $passedAt ?? now(),
             ]);
+
+        app(CertificatePdfService::class)->generateAndStore($certificate);
     }
 }
