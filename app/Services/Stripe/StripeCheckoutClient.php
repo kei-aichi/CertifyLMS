@@ -28,4 +28,18 @@ class StripeCheckoutClient
 
         return $session;
     }
+
+    public function retrieveCheckoutSession(string $sessionId): Session
+    {
+        $secret = config('services.stripe.secret');
+
+        if (! is_string($secret) || $secret === '') {
+            throw new \RuntimeException('Stripeの秘密鍵が設定されていません。');
+        }
+
+        /** @var Session $session */
+        $session = (new StripeClient($secret))->checkout->sessions->retrieve($sessionId);
+
+        return $session;
+    }
 }
