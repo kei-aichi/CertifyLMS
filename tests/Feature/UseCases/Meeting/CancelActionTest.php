@@ -16,11 +16,11 @@ use App\Notifications\MeetingCanceledNotification;
 use App\Services\GoogleCalendarService;
 use App\Services\MeetingQuotaService;
 use App\UseCases\Meeting\CancelAction;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Notification;
-use Illuminate\Auth\Access\AuthorizationException;
 use Mockery;
 use RuntimeException;
 use Tests\TestCase;
@@ -54,7 +54,7 @@ final class CancelActionTest extends TestCase
     public function test_assigned_coach_can_cancel_and_notifies_student(): void
     {
         Notification::fake();
-        [$meeting, , $coach, ] = $this->cancelableMeeting();
+        [$meeting, , $coach] = $this->cancelableMeeting();
 
         $canceled = app(CancelAction::class)($meeting, $coach);
 
@@ -81,7 +81,7 @@ final class CancelActionTest extends TestCase
 
     public function test_rejects_actor_who_is_not_the_student_or_assigned_coach(): void
     {
-        [$meeting, , ] = $this->cancelableMeeting();
+        [$meeting] = $this->cancelableMeeting();
         $otherUser = User::factory()->student()->inProgress()->create();
 
         $this->expectException(AuthorizationException::class);
@@ -140,8 +140,7 @@ final class CancelActionTest extends TestCase
         [$meeting, , , $credential] = $this->googleCancelableMeeting();
         $google = Mockery::mock(GoogleCalendarService::class);
         $google->shouldReceive('deleteEvent')->once()->withArgs(
-            fn (GoogleCredential $current, string $connectionId, string $eventId): bool =>
-                $current->is($credential)
+            fn (GoogleCredential $current, string $connectionId, string $eventId): bool => $current->is($credential)
                 && $connectionId === (string) $credential->id
                 && $eventId === 'event-delete'
         )->andReturnTrue();
@@ -159,8 +158,7 @@ final class CancelActionTest extends TestCase
         Log::spy();
         $google = Mockery::mock(GoogleCalendarService::class);
         $google->shouldReceive('deleteEvent')->once()->withArgs(
-            fn (GoogleCredential $current, string $connectionId, string $eventId): bool =>
-                $current->is($credential)
+            fn (GoogleCredential $current, string $connectionId, string $eventId): bool => $current->is($credential)
                 && $connectionId === (string) $credential->id
                 && $eventId === 'event-delete'
         )->andReturnUsing(function () use ($credential): bool {
@@ -175,8 +173,7 @@ final class CancelActionTest extends TestCase
         $this->assertDatabaseMissing('google_credentials', ['id' => $credential->id]);
         Log::shouldHaveReceived('warning')->once()->with(
             'Google event deletion completed after connection state changed.',
-            Mockery::on(fn (array $context): bool =>
-                $context['operation'] === 'event_delete_state_changed'
+            Mockery::on(fn (array $context): bool => $context['operation'] === 'event_delete_state_changed'
                 && $context['meeting_id'] === $meeting->id
                 && $context['connection_id'] === $credential->id
                 && $context['error_class'] === 'connection_state_changed'
@@ -191,8 +188,7 @@ final class CancelActionTest extends TestCase
         Log::spy();
         $google = Mockery::mock(GoogleCalendarService::class);
         $google->shouldReceive('deleteEvent')->once()->withArgs(
-            fn (GoogleCredential $current, string $connectionId, string $eventId): bool =>
-                $current->is($credential)
+            fn (GoogleCredential $current, string $connectionId, string $eventId): bool => $current->is($credential)
                 && $connectionId === (string) $credential->id
                 && $eventId === 'event-delete'
         )->andReturnUsing(function () use ($coach, $credential): bool {
@@ -211,8 +207,7 @@ final class CancelActionTest extends TestCase
         $this->assertDatabaseMissing('google_credentials', ['id' => $credential->id]);
         Log::shouldHaveReceived('warning')->once()->with(
             'Google event deletion completed after connection state changed.',
-            Mockery::on(fn (array $context): bool =>
-                $context['operation'] === 'event_delete_state_changed'
+            Mockery::on(fn (array $context): bool => $context['operation'] === 'event_delete_state_changed'
                 && $context['meeting_id'] === $meeting->id
                 && $context['connection_id'] === $credential->id
                 && $context['error_class'] === 'connection_state_changed'

@@ -13,8 +13,9 @@ use App\Services\MeetingAvailabilityService;
 use App\UseCases\Meeting\FetchAvailabilityAction;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Mockery;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
+use Mockery;
 use Tests\TestCase;
 
 final class FetchAvailabilityActionTest extends TestCase
@@ -34,7 +35,7 @@ final class FetchAvailabilityActionTest extends TestCase
         $originalDate = $date->copy();
         $slots = (new FetchAvailabilityAction($service))($enrollment, $date);
 
-        $this->assertInstanceOf(\Illuminate\Support\Collection::class, $slots);
+        $this->assertInstanceOf(Collection::class, $slots);
         $this->assertCount(2, $slots);
         $this->assertSame(['09:00', '10:00'], $slots->pluck('slot_start')->map->format('H:i')->all());
         $this->assertSame([1, 1], $slots->pluck('available_coach_count')->all());

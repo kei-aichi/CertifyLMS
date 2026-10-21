@@ -8,8 +8,8 @@ use App\Models\Enrollment;
 use App\Models\Meeting;
 use App\Models\User;
 use App\UseCases\Meeting\ListCoachMeetingsAction;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 final class ListCoachMeetingsActionTest extends TestCase

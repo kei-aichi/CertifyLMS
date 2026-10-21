@@ -15,8 +15,7 @@ final class ListCoachMeetingsAction
         string $filter,
         ?string $studentId,
         ?string $enrollmentId,
-    ): LengthAwarePaginator
-    {
+    ): LengthAwarePaginator {
         $query = Meeting::query()
             ->with(['enrollment.certification', 'student'])
             ->forCoach($coach)

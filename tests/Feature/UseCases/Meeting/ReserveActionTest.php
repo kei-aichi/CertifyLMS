@@ -14,7 +14,6 @@ use App\Models\CoachAvailability;
 use App\Models\Enrollment;
 use App\Models\GoogleCredential;
 use App\Models\Meeting;
-use App\Models\MeetingQuotaTransaction;
 use App\Models\User;
 use App\Notifications\MeetingReservedNotification;
 use App\Services\GoogleCalendarService;
@@ -135,8 +134,7 @@ final class ReserveActionTest extends TestCase
             return 'orphan-event';
         });
         $google->shouldReceive('deleteEvent')->once()->withArgs(
-            fn (GoogleCredential $current, string $connectionId, string $eventId): bool =>
-                $current->is($credential)
+            fn (GoogleCredential $current, string $connectionId, string $eventId): bool => $current->is($credential)
                 && $connectionId === $credential->id
                 && $eventId === 'orphan-event'
         )->andReturnTrue();
