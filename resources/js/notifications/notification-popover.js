@@ -9,7 +9,7 @@ export function initNotificationPopovers() {
         if (!trigger || !panel || root.dataset.notificationInitialized === 'true') return;
 
         root.dataset.notificationInitialized = 'true';
-        const state = { tab: 'all', loading: false, action: false };
+        const state = { tab: 'all', loading: false, action: false, error: false };
         const tabs = root.querySelectorAll('[data-notification-popover-tab]');
         const list = root.querySelector('[data-notification-popover-items]');
         const loading = root.querySelector('[data-notification-popover-loading]');
@@ -29,23 +29,25 @@ export function initNotificationPopovers() {
         };
 
         const showError = () => {
-            if (!empty) return;
             if (list) {
                 list.replaceChildren();
-                list.classList.remove('hidden');
+                list.classList.add('hidden');
             }
+            if (!empty) return;
             empty.textContent = '通知の取得に失敗しました。時間をおいて再試行してください。';
             empty.classList.remove('hidden');
+            state.error = true;
         };
 
         const setLoading = (visible) => {
             state.loading = visible;
             if (loading) loading.classList.toggle('hidden', !visible);
-            if (list) list.classList.toggle('hidden', visible);
+            if (list) list.classList.toggle('hidden', visible || state.error);
         };
 
         const render = (items) => {
             if (!list || !template || !empty) return;
+            state.error = false;
             list.replaceChildren();
             empty.textContent = '通知はありません。';
             empty.classList.toggle('hidden', items.length > 0);
@@ -92,6 +94,7 @@ export function initNotificationPopovers() {
 
         const load = async () => {
             if (state.loading) return;
+            state.error = false;
             setLoading(true);
             try {
                 const payload = await getJson(`${API_URL}?tab=${encodeURIComponent(state.tab)}`);
