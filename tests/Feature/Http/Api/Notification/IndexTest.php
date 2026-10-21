@@ -5,7 +5,10 @@ declare(strict_types=1);
 namespace Tests\Feature\Http\Api\Notification;
 
 use App\Models\User;
+use Illuminate\Contracts\Debug\ExceptionHandler;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Exceptions\ThrottleRequestsException;
+use Illuminate\Http\Request;
 use Illuminate\Notifications\DatabaseNotification;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
@@ -19,7 +22,11 @@ final class IndexTest extends TestCase
     {
         $this->getJson(route('api.v1.notifications.index'))
             ->assertUnauthorized()
-            ->assertJsonStructure(['message']);
+            ->assertJson([
+                'error_code' => 'UNAUTHENTICATED',
+                'status' => 401,
+            ])
+            ->assertJsonStructure(['message', 'error_code', 'status']);
     }
 
     public function test_unauthenticated_mark_as_read_returns_json_401(): void
@@ -62,6 +69,10 @@ final class IndexTest extends TestCase
 
         $this->actingAs($user)->getJson(route('api.v1.notifications.index', ['tab' => 'invalid']))
             ->assertUnprocessable()
+            ->assertJson([
+                'error_code' => 'VALIDATION_ERROR',
+                'status' => 422,
+            ])
             ->assertJsonValidationErrors('tab');
     }
 
@@ -175,11 +186,19 @@ final class IndexTest extends TestCase
 
         $this->actingAs($user)->postJson(route('api.v1.notifications.markAsRead', $notification))
             ->assertForbidden()
+            ->assertJson([
+                'error_code' => 'NOTIFICATION_ACCESS_DENIED',
+                'status' => 403,
+            ])
             ->assertJsonMissing(['message' => '秘密']);
         self::assertNull($notification->fresh()->read_at);
 
         $this->actingAs($user)->postJson(route('api.v1.notifications.markAsRead', ['notification' => (string) Str::uuid()]))
-            ->assertNotFound();
+            ->assertNotFound()
+            ->assertJson([
+                'error_code' => 'NOT_FOUND',
+                'status' => 404,
+            ]);
     }
 
     public function test_notification_status_controls_mark_as_read_access(): void
@@ -281,6 +300,157 @@ final class IndexTest extends TestCase
                 ->assertJsonMissing(['message' => '機密本文']);
             self::assertNull($notification->fresh()->read_at);
         }
+    }
+
+    public function test_admin_can_read_only_their_own_notifications_through_the_api(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $other = User::factory()->inProgress()->create();
+        $mine = $this->notification($admin, ['title' => '管理者本人', 'message' => '本人通知']);
+        $otherNotification = $this->notification($other, ['title' => '他人通知', 'message' => '秘密']);
+
+        $this->actingAs($admin)
+            ->getJson(route('api.v1.notifications.index'))
+            ->assertOk()
+            ->assertJsonFragment(['id' => $mine->id])
+            ->assertJsonMissing(['id' => $otherNotification->id])
+            ->assertJsonMissing(['title' => '他人通知']);
+
+        $this->actingAs($admin)
+            ->postJson(route('api.v1.notifications.markAsRead', $mine))
+            ->assertOk()
+            ->assertJsonPath('data.is_unread', false);
+
+        $adminUnread = $this->notification($admin, ['title' => '管理者未読', 'message' => '一括既読対象']);
+        $this->actingAs($admin)
+            ->postJson(route('api.v1.notifications.markAllAsRead'))
+            ->assertOk()
+            ->assertJsonPath('data.updated_count', 1)
+            ->assertJsonPath('data.unread_count', 0);
+
+        self::assertNotNull($adminUnread->fresh()->read_at);
+        self::assertNull($otherNotification->fresh()->read_at);
+    }
+
+    public function test_admin_cannot_mark_another_users_notification_as_read(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $other = User::factory()->inProgress()->create();
+        $notification = $this->notification($other, ['message' => '他人の秘密']);
+
+        $this->actingAs($admin)
+            ->postJson(route('api.v1.notifications.markAsRead', $notification))
+            ->assertForbidden()
+            ->assertJson([
+                'error_code' => 'NOTIFICATION_ACCESS_DENIED',
+                'status' => 403,
+            ])
+            ->assertJsonMissing(['message' => '他人の秘密']);
+
+        self::assertNull($notification->fresh()->read_at);
+    }
+
+    public function test_admin_has_no_notification_bell_but_keeps_sidebar_notification_link(): void
+    {
+        $this->withoutVite();
+        $admin = User::factory()->admin()->create();
+
+        $this->actingAs($admin)
+            ->get(route('notifications.index'))
+            ->assertOk()
+            ->assertDontSee('data-notification-popover-root')
+            ->assertSee('href="'.route('notifications.index').'"', false);
+    }
+
+    public function test_sanctum_csrf_cookie_is_available_without_authentication(): void
+    {
+        $response = $this->get('/sanctum/csrf-cookie');
+
+        $response->assertNoContent();
+        self::assertNotNull($response->getCookie('XSRF-TOKEN'));
+    }
+
+    public function test_cookie_session_authentication_can_access_notification_api(): void
+    {
+        $user = User::factory()->inProgress()->create([
+            'email' => 'notification-cookie@example.test',
+            'password' => bcrypt('secret-pass'),
+        ]);
+
+        $login = $this->post('/login', [
+            'email' => 'notification-cookie@example.test',
+            'password' => 'secret-pass',
+        ]);
+        $login->assertRedirect();
+
+        $sessionCookie = $login->getCookie(config('session.cookie'));
+        self::assertNotNull($sessionCookie);
+
+        $this->withCookie(config('session.cookie'), $sessionCookie->getValue())
+            ->getJson(route('api.v1.notifications.index'))
+            ->assertOk();
+    }
+
+    public function test_notification_post_with_cookie_session_csrf_token_succeeds(): void
+    {
+        $user = User::factory()->inProgress()->create();
+        $notification = $this->notification($user, ['message' => 'CSRF対象']);
+        $login = $this->post('/login', [
+            'email' => $user->email,
+            'password' => 'password',
+        ]);
+        $sessionCookie = $login->getCookie(config('session.cookie'));
+        self::assertNotNull($sessionCookie);
+
+        $this->withMiddleware()
+            ->withCookie(config('session.cookie'), $sessionCookie->getValue())
+            ->withHeaders([
+                'Origin' => 'http://localhost',
+                'Referer' => 'http://localhost/',
+            ])
+            ->withHeader('X-CSRF-TOKEN', session()->token())
+            ->postJson(route('api.v1.notifications.markAsRead', $notification))
+            ->assertOk()
+            ->assertJsonPath('data.is_unread', false);
+    }
+
+    public function test_unexpected_notification_api_exception_returns_safe_500_json(): void
+    {
+        $request = Request::create(
+            '/api/v1/notifications',
+            'GET',
+            server: ['HTTP_ACCEPT' => 'application/json'],
+        );
+
+        $response = app(ExceptionHandler::class)->render($request, new \RuntimeException('secret details'));
+
+        self::assertSame(500, $response->getStatusCode());
+        self::assertSame([
+            'message' => 'サーバーエラーが発生しました。',
+            'error_code' => 'INTERNAL_SERVER_ERROR',
+            'status' => 500,
+        ], $response->getData(true));
+    }
+
+    public function test_notification_api_rate_limit_returns_common_429_json(): void
+    {
+        $request = Request::create(
+            '/api/v1/notifications',
+            'GET',
+            server: ['HTTP_ACCEPT' => 'application/json'],
+        );
+
+        $response = app(ExceptionHandler::class)->render(
+            $request,
+            new ThrottleRequestsException('Too many requests.'),
+        );
+
+        self::assertSame(429, $response->getStatusCode());
+        self::assertSame([
+            'message' => 'リクエスト過多です。しばらく時間を空けて再試行してください。',
+            'error_code' => 'RATE_LIMIT_EXCEEDED',
+            'status' => 429,
+        ], $response->getData(true));
     }
 
     private function notification(User $user, array $data, ?\DateTimeInterface $readAt = null, ?\DateTimeInterface $createdAt = null): DatabaseNotification

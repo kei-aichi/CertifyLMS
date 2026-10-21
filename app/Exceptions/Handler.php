@@ -4,10 +4,14 @@ declare(strict_types=1);
 
 namespace App\Exceptions;
 
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Foundation\Exceptions\Handler as ExceptionHandler;
 use Illuminate\Http\Exceptions\ThrottleRequestsException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Session\TokenMismatchException;
+use Illuminate\Validation\ValidationException;
+use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 use Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
@@ -60,6 +64,10 @@ class Handler extends ExceptionHandler
         // ブラウザ HTML 経由のドメイン例外を Flash error redirect に変換する。
         // JSON 経由は何も返さない(null を返してデフォルト挙動 = status code + JSON body)。
         $this->renderable(function (HttpException $e, Request $request) {
+            if ($this->isNotificationApi($request) && $e->getStatusCode() === 419) {
+                return $this->apiJsonError('CSRFトークンが一致しません。', 'CSRF_TOKEN_MISMATCH', 419);
+            }
+
             if ($request->expectsJson()) {
                 return null;
             }
@@ -69,6 +77,43 @@ class Handler extends ExceptionHandler
             }
 
             return redirect()->back()->with('error', $e->getMessage());
+        });
+
+        $this->renderable(function (AuthenticationException $e, Request $request) {
+            if (! $this->isNotificationApi($request)) {
+                return null;
+            }
+
+            return $this->apiJsonError('認証が必要です。', 'UNAUTHENTICATED', 401);
+        });
+
+        $this->renderable(function (AccessDeniedHttpException $e, Request $request) {
+            if (! $this->isNotificationApi($request)) {
+                return null;
+            }
+
+            return $this->apiJsonError('通知へのアクセス権限がありません。', 'NOTIFICATION_ACCESS_DENIED', 403);
+        });
+
+        $this->renderable(function (TokenMismatchException $e, Request $request) {
+            if (! $this->isNotificationApi($request)) {
+                return null;
+            }
+
+            return $this->apiJsonError('CSRFトークンが一致しません。', 'CSRF_TOKEN_MISMATCH', 419);
+        });
+
+        $this->renderable(function (ValidationException $e, Request $request) {
+            if (! $this->isNotificationApi($request)) {
+                return null;
+            }
+
+            return $this->apiJsonError(
+                $e->getMessage(),
+                'VALIDATION_ERROR',
+                422,
+                extra: ['errors' => $e->errors()],
+            );
         });
 
         // 運用エクスポート API (`/api/*`) のレート制限超過は常に JSON で返す。
@@ -110,6 +155,20 @@ class Handler extends ExceptionHandler
                 headers: $e->getHeaders(),
             );
         });
+
+        $this->renderable(function (Throwable $e, Request $request) {
+            if (! $this->isNotificationApi($request)) {
+                return null;
+            }
+
+            return $this->apiJsonError('サーバーエラーが発生しました。', 'INTERNAL_SERVER_ERROR', 500);
+        });
+    }
+
+    private function isNotificationApi(Request $request): bool
+    {
+        return $request->is('api/v1/notifications')
+            || $request->is('api/v1/notifications/*');
     }
 
     /**
@@ -117,13 +176,20 @@ class Handler extends ExceptionHandler
      *
      * @param array<string, string> $headers
      */
-    private function apiJsonError(string $message, string $errorCode, int $status, array $headers = []): JsonResponse
+    /** @param array<string, mixed> $extra */
+    private function apiJsonError(
+        string $message,
+        string $errorCode,
+        int $status,
+        array $headers = [],
+        array $extra = [],
+    ): JsonResponse
     {
-        $response = response()->json([
+        $response = response()->json(array_merge([
             'message' => $message,
             'error_code' => $errorCode,
             'status' => $status,
-        ], $status);
+        ], $extra), $status);
 
         $response->header('Content-Type', 'application/json; charset=UTF-8');
 
