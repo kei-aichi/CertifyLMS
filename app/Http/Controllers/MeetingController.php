@@ -173,9 +173,8 @@ class MeetingController extends Controller
      */
     public function fetchAvailability(Enrollment $enrollment, AvailabilityRequest $request, FetchAvailabilityAction $action): JsonResponse
     {
-        $result = $action($enrollment, $request->validated('date'));
-        $date = $result['date'];
-        $slots = $result['slots'];
+        $date = Carbon::parse($request->validated('date'));
+        $slots = $action($enrollment, $date);
 
         return response()->json([
             'date' => $date->toDateString(),

@@ -13,15 +13,12 @@ final class FetchAvailabilityAction
 {
     public function __construct(private readonly MeetingAvailabilityService $availabilityService) {}
 
-    /** @return array{date: Carbon, slots: Collection<int, array<string, mixed>>} */
-    public function __invoke(Enrollment $enrollment, string $date): array
+    /** @return Collection<int, array<string, mixed>> */
+    public function __invoke(Enrollment $enrollment, Carbon $date): Collection
     {
-        $parsedDate = Carbon::parse($date);
-        $slots = $this->availabilityService->slotsForCertification(
+        return $this->availabilityService->slotsForCertification(
             $enrollment->loadMissing('certification')->certification,
-            $parsedDate,
+            $date,
         );
-
-        return ['date' => $parsedDate, 'slots' => $slots];
     }
 }

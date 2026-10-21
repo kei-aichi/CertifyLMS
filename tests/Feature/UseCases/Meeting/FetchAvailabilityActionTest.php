@@ -11,6 +11,7 @@ use App\Models\User;
 use App\Services\GoogleCalendarService;
 use App\Services\MeetingAvailabilityService;
 use App\UseCases\Meeting\FetchAvailabilityAction;
+use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Mockery;
 use Illuminate\Support\Str;
@@ -29,12 +30,15 @@ final class FetchAvailabilityActionTest extends TestCase
         $enrollment = Enrollment::factory()->for($certification)->create();
         $service = new MeetingAvailabilityService(Mockery::mock(GoogleCalendarService::class));
 
-        $result = (new FetchAvailabilityAction($service))($enrollment, '2026-06-01T12:34:00');
+        $date = Carbon::parse('2026-06-01T12:34:00', 'Asia/Tokyo');
+        $originalDate = $date->copy();
+        $slots = (new FetchAvailabilityAction($service))($enrollment, $date);
 
-        $this->assertSame('2026-06-01', $result['date']->toDateString());
-        $this->assertCount(2, $result['slots']);
-        $this->assertSame(['09:00', '10:00'], $result['slots']->pluck('slot_start')->map->format('H:i')->all());
-        $this->assertSame([1, 1], $result['slots']->pluck('available_coach_count')->all());
+        $this->assertInstanceOf(\Illuminate\Support\Collection::class, $slots);
+        $this->assertCount(2, $slots);
+        $this->assertSame(['09:00', '10:00'], $slots->pluck('slot_start')->map->format('H:i')->all());
+        $this->assertSame([1, 1], $slots->pluck('available_coach_count')->all());
+        $this->assertSame($originalDate->toIso8601String(), $date->toIso8601String());
     }
 
     public function test_excludes_other_certification_and_other_date_availability(): void
@@ -51,10 +55,10 @@ final class FetchAvailabilityActionTest extends TestCase
         $enrollment = Enrollment::factory()->for($certification)->create();
         $service = new MeetingAvailabilityService(Mockery::mock(GoogleCalendarService::class));
 
-        $result = (new FetchAvailabilityAction($service))($enrollment, '2026-06-01');
+        $slots = (new FetchAvailabilityAction($service))($enrollment, Carbon::parse('2026-06-01', 'Asia/Tokyo'));
 
-        $this->assertSame(['09:00'], $result['slots']->pluck('slot_start')->map->format('H:i')->all());
-        $this->assertSame([1], $result['slots']->pluck('available_coach_count')->all());
+        $this->assertSame(['09:00'], $slots->pluck('slot_start')->map->format('H:i')->all());
+        $this->assertSame([1], $slots->pluck('available_coach_count')->all());
     }
 
     public function test_returns_empty_slots_without_extra_processing(): void
@@ -62,10 +66,9 @@ final class FetchAvailabilityActionTest extends TestCase
         $enrollment = Enrollment::factory()->create();
         $service = new MeetingAvailabilityService(Mockery::mock(GoogleCalendarService::class));
 
-        $result = (new FetchAvailabilityAction($service))($enrollment, '2026-06-01');
+        $slots = (new FetchAvailabilityAction($service))($enrollment, Carbon::parse('2026-06-01', 'Asia/Tokyo'));
 
-        $this->assertTrue($result['slots']->isEmpty());
-        $this->assertSame('2026-06-01', $result['date']->toDateString());
+        $this->assertTrue($slots->isEmpty());
     }
 
     private function attachCoach(Certification $certification, User $coach): void
