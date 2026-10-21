@@ -135,9 +135,10 @@ final class IndexTest extends TestCase
             ->assertJsonStructure(['data' => [
                 'id', 'type', 'notification_type', 'title', 'preview',
                 'created_at', 'relative_time', 'read_at', 'is_unread', 'redirect_url',
-            ]])
+            ], 'meta' => ['unread_count']])
             ->assertJsonPath('data.id', $notification->id)
-            ->assertJsonPath('data.is_unread', false);
+            ->assertJsonPath('data.is_unread', false)
+            ->assertJsonPath('meta.unread_count', 0);
         $firstReadAt = $notification->fresh()->read_at;
         self::assertNotNull($firstReadAt);
         self::assertSame($firstReadAt->toIso8601String(), $response->json('data.read_at'));
@@ -146,8 +147,24 @@ final class IndexTest extends TestCase
         $second = $this->actingAs($user)->postJson(
             route('api.v1.notifications.markAsRead', $notification),
         );
-        $second->assertOk()->assertJsonPath('data.is_unread', false);
+        $second->assertOk()
+            ->assertJsonPath('data.is_unread', false)
+            ->assertJsonPath('meta.unread_count', 0);
         self::assertSame($firstReadAt->toIso8601String(), $notification->fresh()->read_at?->toIso8601String());
+    }
+
+    public function test_marking_one_of_multiple_unread_notifications_updates_unread_count(): void
+    {
+        $user = User::factory()->inProgress()->create();
+        $notification = $this->notification($user, ['message' => '未読1']);
+        $this->notification($user, ['message' => '未読2']);
+
+        $this->actingAs($user)
+            ->postJson(route('api.v1.notifications.markAsRead', $notification))
+            ->assertOk()
+            ->assertJsonPath('meta.unread_count', 1);
+
+        self::assertNotNull($notification->fresh()->read_at);
     }
 
     public function test_other_user_notification_and_missing_notification_are_rejected(): void

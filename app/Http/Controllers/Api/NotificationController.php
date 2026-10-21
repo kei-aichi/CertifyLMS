@@ -49,7 +49,11 @@ final class NotificationController extends Controller
         $this->authorize('markAsRead', $notification);
         $action($request->user(), $notification);
 
-        return new NotificationResource($notification->fresh());
+        return (new NotificationResource($notification->fresh()))->additional([
+            'meta' => [
+                'unread_count' => $request->user()->unreadNotifications()->count(),
+            ],
+        ]);
     }
 
     public function markAllAsRead(Request $request, MarkAllAsReadAction $action): JsonResponse

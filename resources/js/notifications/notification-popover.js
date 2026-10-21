@@ -30,6 +30,10 @@ export function initNotificationPopovers() {
 
         const showError = () => {
             if (!empty) return;
+            if (list) {
+                list.replaceChildren();
+                list.classList.remove('hidden');
+            }
             empty.textContent = '通知の取得に失敗しました。時間をおいて再試行してください。';
             empty.classList.remove('hidden');
         };
@@ -67,7 +71,15 @@ export function initNotificationPopovers() {
                     link.setAttribute('aria-disabled', 'true');
                     try {
                         const result = await postJson(`${API_URL}/${encodeURIComponent(notification.id)}/read`);
-                        window.location.assign(result?.data?.redirect_url || '/notifications');
+                        setBadge(result?.meta?.unread_count ?? 0);
+                        const redirectUrl = result?.data?.redirect_url;
+                        if (!redirectUrl) {
+                            showError();
+                            state.action = false;
+                            link.removeAttribute('aria-disabled');
+                            return;
+                        }
+                        window.location.assign(redirectUrl);
                     } catch (error) {
                         showError();
                         state.action = false;
