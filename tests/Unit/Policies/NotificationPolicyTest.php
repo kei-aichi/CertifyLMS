@@ -6,6 +6,7 @@ namespace Tests\Unit\Policies;
 
 use App\Models\User;
 use App\Policies\NotificationPolicy;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Notifications\DatabaseNotification;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -13,6 +14,8 @@ use Tests\TestCase;
 
 final class NotificationPolicyTest extends TestCase
 {
+    use RefreshDatabase;
+
     #[DataProvider('notificationAccessStatuses')]
     public function test_notification_access_is_limited_by_user_status(string $factoryState, bool $expected): void
     {
