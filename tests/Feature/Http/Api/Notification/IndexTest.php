@@ -7,6 +7,7 @@ namespace Tests\Feature\Http\Api\Notification;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Notifications\DatabaseNotification;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -19,6 +20,15 @@ final class IndexTest extends TestCase
         $this->getJson(route('api.v1.notifications.index'))
             ->assertUnauthorized()
             ->assertJsonStructure(['message']);
+    }
+
+    public function test_unauthenticated_mark_as_read_returns_json_401(): void
+    {
+        $user = User::factory()->inProgress()->create();
+        $notification = $this->notification($user, ['message' => '本文']);
+
+        $this->postJson(route('api.v1.notifications.markAsRead', $notification))
+            ->assertUnauthorized();
     }
 
     public function test_only_owned_notifications_are_returned_with_unread_count(): void
@@ -110,6 +120,68 @@ final class IndexTest extends TestCase
         self::assertSame(route('notifications.index'), $byTitle['通知']['redirect_url']);
         self::assertStringStartsWith(route('notifications.show', $messageNotification), $byTitle['タイトル']['redirect_url']);
         self::assertStringNotContainsString('evil.example.test', json_encode($data, JSON_THROW_ON_ERROR));
+    }
+
+    public function test_owner_can_mark_notification_as_read_and_repeat_safely(): void
+    {
+        $user = User::factory()->inProgress()->create();
+        $notification = $this->notification($user, ['message' => '本文']);
+
+        $response = $this->actingAs($user)->postJson(
+            route('api.v1.notifications.markAsRead', $notification),
+        );
+
+        $response->assertOk()
+            ->assertJsonStructure(['data' => [
+                'id', 'type', 'notification_type', 'title', 'preview',
+                'created_at', 'relative_time', 'read_at', 'is_unread', 'redirect_url',
+            ]])
+            ->assertJsonPath('data.id', $notification->id)
+            ->assertJsonPath('data.is_unread', false);
+        $firstReadAt = $notification->fresh()->read_at;
+        self::assertNotNull($firstReadAt);
+        self::assertSame($firstReadAt->toIso8601String(), $response->json('data.read_at'));
+        self::assertSame($firstReadAt->toIso8601String(), Carbon::parse($response->json('data.read_at'))->toIso8601String());
+
+        $second = $this->actingAs($user)->postJson(
+            route('api.v1.notifications.markAsRead', $notification),
+        );
+        $second->assertOk()->assertJsonPath('data.is_unread', false);
+        self::assertSame($firstReadAt->toIso8601String(), $notification->fresh()->read_at?->toIso8601String());
+    }
+
+    public function test_other_user_notification_and_missing_notification_are_rejected(): void
+    {
+        $user = User::factory()->inProgress()->create();
+        $other = User::factory()->inProgress()->create();
+        $notification = $this->notification($other, ['message' => '秘密']);
+
+        $this->actingAs($user)->postJson(route('api.v1.notifications.markAsRead', $notification))
+            ->assertForbidden()
+            ->assertJsonMissing(['message' => '秘密']);
+        self::assertNull($notification->fresh()->read_at);
+
+        $this->actingAs($user)->postJson(route('api.v1.notifications.markAsRead', ['notification' => (string) Str::uuid()]))
+            ->assertNotFound();
+    }
+
+    public function test_notification_status_controls_mark_as_read_access(): void
+    {
+        foreach (['inProgress' => 200, 'graduated' => 200, 'invited' => 403, 'withdrawn' => 403] as $state => $status) {
+            $user = User::factory()->{$state}()->create();
+            $notification = $this->notification($user, ['message' => $state]);
+
+            $response = $this->actingAs($user)->postJson(
+                route('api.v1.notifications.markAsRead', $notification),
+            );
+            $response->assertStatus($status);
+
+            if ($status === 403) {
+                self::assertNull($notification->fresh()->read_at);
+            } else {
+                self::assertNotNull($notification->fresh()->read_at);
+            }
+        }
     }
 
     private function notification(User $user, array $data, ?\DateTimeInterface $readAt = null, ?\DateTimeInterface $createdAt = null): DatabaseNotification

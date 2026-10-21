@@ -7,6 +7,8 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\Notification\IndexRequest;
 use App\Http\Resources\NotificationResource;
+use App\UseCases\Notification\MarkAsReadAction;
+use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Notifications\DatabaseNotification;
 
@@ -35,5 +37,16 @@ final class NotificationController extends Controller
                 'unread_count' => $user->unreadNotifications()->count(),
             ],
         ]);
+    }
+
+    public function markAsRead(
+        Request $request,
+        DatabaseNotification $notification,
+        MarkAsReadAction $action,
+    ): NotificationResource {
+        $this->authorize('markAsRead', $notification);
+        $action($request->user(), $notification);
+
+        return new NotificationResource($notification->fresh());
     }
 }

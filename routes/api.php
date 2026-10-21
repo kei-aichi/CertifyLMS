@@ -21,3 +21,6 @@ Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
 
 Route::middleware('auth:sanctum')->get('/v1/notifications', [NotificationController::class, 'index'])
     ->name('api.v1.notifications.index');
+
+Route::middleware('auth:sanctum')->post('/v1/notifications/{notification}/read', [NotificationController::class, 'markAsRead'])
+    ->name('api.v1.notifications.markAsRead');

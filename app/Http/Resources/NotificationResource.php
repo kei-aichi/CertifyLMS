@@ -7,8 +7,7 @@ namespace App\Http\Resources;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Notifications\DatabaseNotification;
-use Illuminate\Support\Facades\Route;
-use Throwable;
+use App\UseCases\Notification\NotificationRedirectUrlResolver;
 
 /** @mixin DatabaseNotification */
 final class NotificationResource extends JsonResource
@@ -29,7 +28,7 @@ final class NotificationResource extends JsonResource
             'relative_time' => $this->created_at?->diffForHumans(),
             'read_at' => $readAt?->toIso8601String(),
             'is_unread' => $readAt === null,
-            'redirect_url' => $this->redirectUrl($data),
+            'redirect_url' => (new NotificationRedirectUrlResolver())($this->resource),
         ];
     }
 
@@ -45,28 +44,4 @@ final class NotificationResource extends JsonResource
         return '';
     }
 
-    /** @param array<string, mixed> $data */
-    private function redirectUrl(array $data): string
-    {
-        $routeName = $data['redirect_route'] ?? null;
-        $parameters = $data['redirect_parameters'] ?? [];
-        $allowedRoutes = ['chat.show', 'qa-board.show', 'meetings.show', 'notifications.show'];
-
-        if (! is_string($routeName)
-            || ! in_array($routeName, $allowedRoutes, true)
-            || ! is_array($parameters)
-            || ! Route::has($routeName)) {
-            return route('notifications.index');
-        }
-
-        if ($routeName === 'notifications.show') {
-            $parameters = ['notification' => $this->getKey()];
-        }
-
-        try {
-            return route($routeName, $parameters);
-        } catch (Throwable) {
-            return route('notifications.index');
-        }
-    }
 }
