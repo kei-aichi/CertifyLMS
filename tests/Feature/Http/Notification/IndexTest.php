@@ -14,6 +14,12 @@ final class IndexTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->withoutVite();
+    }
+
     public function test_user_can_view_only_their_notifications_and_filter_unread(): void
     {
         $user = User::factory()->create();
@@ -163,6 +169,54 @@ final class IndexTest extends TestCase
         $bulk = $this->notification($user, '卒業後も一括既読可能');
         $this->actingAs($user)->post(route('notifications.markAllAsRead'))->assertRedirect(route('notifications.index'));
         $this->assertNotNull($bulk->fresh()->read_at);
+    }
+
+    public function test_withdrawn_user_cannot_view_notification_index(): void
+    {
+        $user = User::factory()->withdrawn()->create();
+        $this->notification($user, '退会ユーザーの通知');
+
+        $this->actingAs($user)
+            ->get(route('notifications.index'))
+            ->assertForbidden()
+            ->assertDontSeeText('退会ユーザーの通知');
+    }
+
+    public function test_withdrawn_user_cannot_view_notification_detail(): void
+    {
+        $user = User::factory()->withdrawn()->create();
+        $notification = $this->notification($user, '退会ユーザーの本文');
+
+        $this->actingAs($user)
+            ->get(route('notifications.show', $notification))
+            ->assertForbidden()
+            ->assertDontSeeText('退会ユーザーの本文');
+    }
+
+    public function test_withdrawn_user_cannot_mark_one_notification_as_read(): void
+    {
+        $user = User::factory()->withdrawn()->create();
+        $notification = $this->notification($user, '退会ユーザーの通知');
+
+        $this->actingAs($user)
+            ->post(route('notifications.markAsRead', $notification))
+            ->assertForbidden()
+            ->assertDontSeeText('退会ユーザーの通知');
+
+        $this->assertNull($notification->fresh()->read_at);
+    }
+
+    public function test_withdrawn_user_cannot_mark_all_notifications_as_read(): void
+    {
+        $user = User::factory()->withdrawn()->create();
+        $notification = $this->notification($user, '退会ユーザーの通知');
+
+        $this->actingAs($user)
+            ->post(route('notifications.markAllAsRead'))
+            ->assertForbidden()
+            ->assertDontSeeText('退会ユーザーの通知');
+
+        $this->assertNull($notification->fresh()->read_at);
     }
 
     public function test_arbitrary_redirect_url_in_notification_data_is_not_used(): void
