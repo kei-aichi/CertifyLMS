@@ -10,13 +10,13 @@ use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 
 final class ListCoachMeetingsAction
 {
-    /** @return array{meetings: LengthAwarePaginator, filter: string, studentFilter: ?string, enrollmentFilter: ?string} */
-    public function __invoke(User $coach, array $filters): array
+    public function __invoke(
+        User $coach,
+        string $filter,
+        ?string $studentId,
+        ?string $enrollmentId,
+    ): LengthAwarePaginator
     {
-        $filter = $filters['filter'] ?? 'upcoming';
-        $studentId = $filters['student'] ?? null;
-        $enrollmentId = $filters['enrollment'] ?? null;
-
         $query = Meeting::query()
             ->with(['enrollment.certification', 'student'])
             ->forCoach($coach)
@@ -29,9 +29,6 @@ final class ListCoachMeetingsAction
             default => $query->upcoming()->orderBy('scheduled_at')->paginate(20),
         };
 
-        return compact('meetings', 'filter') + [
-            'studentFilter' => $studentId,
-            'enrollmentFilter' => $enrollmentId,
-        ];
+        return $meetings;
     }
 }

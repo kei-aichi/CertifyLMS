@@ -57,14 +57,16 @@ class MeetingController extends Controller
      */
     public function indexAsCoach(IndexAsCoachRequest $request, ListCoachMeetingsAction $action): View
     {
-        $filters = $request->validated();
-        $result = $action($request->user(), $filters);
+        $filter = $request->validated('filter') ?? 'upcoming';
+        $studentFilter = $request->validated('student');
+        $enrollmentFilter = $request->validated('enrollment');
+        $meetings = $action($request->user(), $filter, $studentFilter, $enrollmentFilter);
 
         return view('meeting.coach.index', [
-            'meetings' => $result['meetings'],
-            'filter' => $result['filter'],
-            'studentFilter' => $result['studentFilter'],
-            'enrollmentFilter' => $result['enrollmentFilter'],
+            'meetings' => $meetings,
+            'filter' => $filter,
+            'studentFilter' => $studentFilter,
+            'enrollmentFilter' => $enrollmentFilter,
         ]);
     }
 
