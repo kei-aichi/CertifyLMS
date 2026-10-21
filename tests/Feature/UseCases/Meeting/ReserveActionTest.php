@@ -12,15 +12,18 @@ use App\Exceptions\Mentoring\MeetingOutOfAvailabilityException;
 use App\Models\Certification;
 use App\Models\CoachAvailability;
 use App\Models\Enrollment;
+use App\Models\GoogleCredential;
 use App\Models\Meeting;
 use App\Models\MeetingQuotaTransaction;
 use App\Models\User;
 use App\Notifications\MeetingReservedNotification;
+use App\Services\GoogleCalendarService;
 use App\UseCases\Meeting\ReserveAction;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Str;
+use Mockery;
 use Tests\TestCase;
 
 final class ReserveActionTest extends TestCase
@@ -120,6 +123,65 @@ final class ReserveActionTest extends TestCase
         }
     }
 
+    public function test_public_action_compensates_orphaned_event_when_meeting_is_canceled_during_creation(): void
+    {
+        Notification::fake();
+        [$enrollment, $scheduledAt, $credential] = $this->googleReservationFixture();
+        $google = Mockery::mock(GoogleCalendarService::class);
+        $google->shouldReceive('freeBusy')->once()->andReturn([]);
+        $google->shouldReceive('createEvent')->once()->andReturnUsing(function (GoogleCredential $googleCredential, Meeting $meeting): string {
+            $meeting->update(['status' => MeetingStatus::Canceled->value]);
+
+            return 'orphan-event';
+        });
+        $google->shouldReceive('deleteEvent')->once()->withArgs(
+            fn (GoogleCredential $current, string $connectionId, string $eventId): bool =>
+                $current->is($credential)
+                && $connectionId === $credential->id
+                && $eventId === 'orphan-event'
+        )->andReturnTrue();
+        $this->app->instance(GoogleCalendarService::class, $google);
+
+        app(ReserveAction::class)($enrollment, $scheduledAt, '作成競合');
+    }
+
+    public function test_public_action_does_not_compensate_after_google_disconnect_during_creation(): void
+    {
+        Notification::fake();
+        [$enrollment, $scheduledAt, $credential] = $this->googleReservationFixture();
+        $google = Mockery::mock(GoogleCalendarService::class);
+        $google->shouldReceive('freeBusy')->once()->andReturn([]);
+        $google->shouldReceive('createEvent')->once()->andReturnUsing(function (GoogleCredential $googleCredential, Meeting $meeting) use ($credential): string {
+            $meeting->update(['status' => MeetingStatus::Canceled->value]);
+            $credential->delete();
+
+            return 'orphan-event';
+        });
+        $google->shouldNotReceive('deleteEvent');
+        $this->app->instance(GoogleCalendarService::class, $google);
+
+        app(ReserveAction::class)($enrollment, $scheduledAt, '解除競合');
+    }
+
+    public function test_public_action_does_not_compensate_with_reconnected_credential_during_creation(): void
+    {
+        Notification::fake();
+        [$enrollment, $scheduledAt, $credential] = $this->googleReservationFixture();
+        $google = Mockery::mock(GoogleCalendarService::class);
+        $google->shouldReceive('freeBusy')->once()->andReturn([]);
+        $google->shouldReceive('createEvent')->once()->andReturnUsing(function (GoogleCredential $googleCredential, Meeting $meeting) use ($credential): string {
+            $meeting->update(['status' => MeetingStatus::Canceled->value]);
+            $credential->delete();
+            GoogleCredential::factory()->for($meeting->coach, 'coach')->create();
+
+            return 'orphan-event';
+        });
+        $google->shouldNotReceive('deleteEvent');
+        $this->app->instance(GoogleCalendarService::class, $google);
+
+        app(ReserveAction::class)($enrollment, $scheduledAt, '再接続競合');
+    }
+
     /** @return array{User, User, Enrollment, Carbon} */
     private function reservationFixture(): array
     {
@@ -143,6 +205,16 @@ final class ReserveActionTest extends TestCase
         $enrollment = Enrollment::factory()->for($student, 'user')->for($certification)->learning()->create();
 
         return [$enrollment, $scheduledAt, $coach];
+    }
+
+    /** @return array{Enrollment, Carbon, GoogleCredential} */
+    private function googleReservationFixture(): array
+    {
+        $student = User::factory()->student()->inProgress()->create(['max_meetings' => 1]);
+        [$enrollment, $scheduledAt, $coach] = $this->enrollmentFixture($student);
+        $credential = GoogleCredential::factory()->for($coach, 'coach')->create();
+
+        return [$enrollment, $scheduledAt, $credential];
     }
 
     private function scheduledAt(): Carbon
