@@ -55,11 +55,13 @@ final class NotificationController extends Controller
     public function markAllAsRead(Request $request, MarkAllAsReadAction $action): JsonResponse
     {
         $this->authorize('markAllAsRead', DatabaseNotification::class);
-        $updatedCount = $action($request->user());
+        $user = $request->user();
+        $updatedCount = $action($user);
 
         return response()->json([
             'data' => [
                 'updated_count' => $updatedCount,
+                'unread_count' => $user->unreadNotifications()->count(),
             ],
         ]);
     }

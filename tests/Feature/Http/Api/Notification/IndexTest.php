@@ -195,7 +195,7 @@ final class IndexTest extends TestCase
 
         $response = $this->actingAs($user)->postJson(route('api.v1.notifications.markAllAsRead'));
 
-        $response->assertOk()->assertExactJson(['data' => ['updated_count' => 2]]);
+        $response->assertOk()->assertExactJson(['data' => ['updated_count' => 2, 'unread_count' => 0]]);
         self::assertNotNull($unreadOne->fresh()->read_at);
         self::assertNotNull($unreadTwo->fresh()->read_at);
         self::assertSame($readAt->toIso8601String(), $alreadyRead->fresh()->read_at?->toIso8601String());
@@ -211,14 +211,14 @@ final class IndexTest extends TestCase
         ];
 
         $first = $this->actingAs($user)->postJson(route('api.v1.notifications.markAllAsRead'));
-        $first->assertOk()->assertExactJson(['data' => ['updated_count' => 2]]);
+        $first->assertOk()->assertExactJson(['data' => ['updated_count' => 2, 'unread_count' => 0]]);
         $firstReadAt = array_map(
             static fn (DatabaseNotification $notification): string => $notification->fresh()->read_at->toIso8601String(),
             $notifications,
         );
 
         $second = $this->actingAs($user)->postJson(route('api.v1.notifications.markAllAsRead'));
-        $second->assertOk()->assertExactJson(['data' => ['updated_count' => 0]]);
+        $second->assertOk()->assertExactJson(['data' => ['updated_count' => 0, 'unread_count' => 0]]);
         $secondReadAt = array_map(
             static fn (DatabaseNotification $notification): string => $notification->fresh()->read_at->toIso8601String(),
             $notifications,
@@ -234,7 +234,7 @@ final class IndexTest extends TestCase
 
         $this->actingAs($user)->postJson(route('api.v1.notifications.markAllAsRead'))
             ->assertOk()
-            ->assertExactJson(['data' => ['updated_count' => 1]]);
+            ->assertExactJson(['data' => ['updated_count' => 1, 'unread_count' => 0]]);
 
         self::assertNotNull($notification->fresh()->read_at);
     }
@@ -247,7 +247,7 @@ final class IndexTest extends TestCase
 
         $this->actingAs($user)->postJson(route('api.v1.notifications.markAllAsRead'))
             ->assertOk()
-            ->assertExactJson(['data' => ['updated_count' => 0]]);
+            ->assertExactJson(['data' => ['updated_count' => 0, 'unread_count' => 0]]);
         self::assertSame($readAt->toIso8601String(), $notification->fresh()->read_at?->toIso8601String());
     }
 
