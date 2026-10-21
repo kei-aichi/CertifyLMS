@@ -24,3 +24,6 @@ Route::middleware('auth:sanctum')->get('/v1/notifications', [NotificationControl
 
 Route::middleware('auth:sanctum')->post('/v1/notifications/{notification}/read', [NotificationController::class, 'markAsRead'])
     ->name('api.v1.notifications.markAsRead');
+
+Route::middleware('auth:sanctum')->post('/v1/notifications/read-all', [NotificationController::class, 'markAllAsRead'])
+    ->name('api.v1.notifications.markAllAsRead');

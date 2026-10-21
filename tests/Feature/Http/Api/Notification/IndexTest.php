@@ -184,6 +184,88 @@ final class IndexTest extends TestCase
         }
     }
 
+    public function test_owner_can_mark_all_unread_notifications_as_read(): void
+    {
+        $user = User::factory()->inProgress()->create();
+        $unreadOne = $this->notification($user, ['message' => '未読1']);
+        $unreadTwo = $this->notification($user, ['message' => '未読2']);
+        $readAt = now()->subMinute();
+        $alreadyRead = $this->notification($user, ['message' => '既読'], $readAt);
+        $other = $this->notification(User::factory()->inProgress()->create(), ['message' => '他人の秘密']);
+
+        $response = $this->actingAs($user)->postJson(route('api.v1.notifications.markAllAsRead'));
+
+        $response->assertOk()->assertExactJson(['data' => ['updated_count' => 2]]);
+        self::assertNotNull($unreadOne->fresh()->read_at);
+        self::assertNotNull($unreadTwo->fresh()->read_at);
+        self::assertSame($readAt->toIso8601String(), $alreadyRead->fresh()->read_at?->toIso8601String());
+        self::assertNull($other->fresh()->read_at);
+    }
+
+    public function test_mark_all_is_idempotent_on_second_request(): void
+    {
+        $user = User::factory()->inProgress()->create();
+        $notifications = [
+            $this->notification($user, ['message' => '未読1']),
+            $this->notification($user, ['message' => '未読2']),
+        ];
+
+        $first = $this->actingAs($user)->postJson(route('api.v1.notifications.markAllAsRead'));
+        $first->assertOk()->assertExactJson(['data' => ['updated_count' => 2]]);
+        $firstReadAt = array_map(
+            static fn (DatabaseNotification $notification): string => $notification->fresh()->read_at->toIso8601String(),
+            $notifications,
+        );
+
+        $second = $this->actingAs($user)->postJson(route('api.v1.notifications.markAllAsRead'));
+        $second->assertOk()->assertExactJson(['data' => ['updated_count' => 0]]);
+        $secondReadAt = array_map(
+            static fn (DatabaseNotification $notification): string => $notification->fresh()->read_at->toIso8601String(),
+            $notifications,
+        );
+
+        self::assertSame($firstReadAt, $secondReadAt);
+    }
+
+    public function test_graduated_user_can_mark_all_notifications_as_read(): void
+    {
+        $user = User::factory()->graduated()->create();
+        $notification = $this->notification($user, ['message' => '卒業後の未読通知']);
+
+        $this->actingAs($user)->postJson(route('api.v1.notifications.markAllAsRead'))
+            ->assertOk()
+            ->assertExactJson(['data' => ['updated_count' => 1]]);
+
+        self::assertNotNull($notification->fresh()->read_at);
+    }
+
+    public function test_mark_all_is_safe_when_there_are_no_unread_notifications(): void
+    {
+        $user = User::factory()->inProgress()->create();
+        $readAt = now()->subMinute();
+        $notification = $this->notification($user, ['message' => '既読'], $readAt);
+
+        $this->actingAs($user)->postJson(route('api.v1.notifications.markAllAsRead'))
+            ->assertOk()
+            ->assertExactJson(['data' => ['updated_count' => 0]]);
+        self::assertSame($readAt->toIso8601String(), $notification->fresh()->read_at?->toIso8601String());
+    }
+
+    public function test_mark_all_requires_authentication_and_allowed_status(): void
+    {
+        $this->postJson(route('api.v1.notifications.markAllAsRead'))->assertUnauthorized();
+
+        foreach (['invited', 'withdrawn'] as $state) {
+            $user = User::factory()->{$state}()->create();
+            $notification = $this->notification($user, ['message' => '機密本文']);
+
+            $this->actingAs($user)->postJson(route('api.v1.notifications.markAllAsRead'))
+                ->assertForbidden()
+                ->assertJsonMissing(['message' => '機密本文']);
+            self::assertNull($notification->fresh()->read_at);
+        }
+    }
+
     private function notification(User $user, array $data, ?\DateTimeInterface $readAt = null, ?\DateTimeInterface $createdAt = null): DatabaseNotification
     {
         return DatabaseNotification::create([

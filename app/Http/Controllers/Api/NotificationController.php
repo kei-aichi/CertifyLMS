@@ -8,7 +8,9 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\Notification\IndexRequest;
 use App\Http\Resources\NotificationResource;
 use App\UseCases\Notification\MarkAsReadAction;
+use App\UseCases\Notification\MarkAllAsReadAction;
 use Illuminate\Http\Request;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Notifications\DatabaseNotification;
 
@@ -48,5 +50,17 @@ final class NotificationController extends Controller
         $action($request->user(), $notification);
 
         return new NotificationResource($notification->fresh());
+    }
+
+    public function markAllAsRead(Request $request, MarkAllAsReadAction $action): JsonResponse
+    {
+        $this->authorize('markAllAsRead', DatabaseNotification::class);
+        $updatedCount = $action($request->user());
+
+        return response()->json([
+            'data' => [
+                'updated_count' => $updatedCount,
+            ],
+        ]);
     }
 }
