@@ -21,7 +21,7 @@ final class ListStudentMeetingsActionTest extends TestCase
         $own = Meeting::factory()->forStudent($student)->inFuture()->create();
         Meeting::factory()->inFuture()->create();
 
-        $result = app(ListStudentMeetingsAction::class)($student);
+        $result = app(ListStudentMeetingsAction::class)($student, 'upcoming');
 
         $this->assertInstanceOf(StudentMeetingsIndexViewModel::class, $result);
         $this->assertSame('upcoming', $result->filter);
@@ -45,7 +45,7 @@ final class ListStudentMeetingsActionTest extends TestCase
         $student = User::factory()->student()->create();
         Meeting::factory()->count(21)->forStudent($student)->inFuture()->create();
 
-        $result = app(ListStudentMeetingsAction::class)($student);
+        $result = app(ListStudentMeetingsAction::class)($student, 'upcoming');
 
         $this->assertSame(20, $result->meetings->perPage());
         $this->assertSame(21, $result->meetings->total());

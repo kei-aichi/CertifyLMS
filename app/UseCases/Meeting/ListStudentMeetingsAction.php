@@ -13,7 +13,7 @@ final class ListStudentMeetingsAction
 {
     public function __construct(private readonly MeetingQuotaService $meetingQuota) {}
 
-    public function __invoke(User $student, string $filter = 'upcoming'): StudentMeetingsIndexViewModel
+    public function __invoke(User $student, string $filter): StudentMeetingsIndexViewModel
     {
         $query = Meeting::query()
             ->with(['enrollment.certification', 'coach'])
