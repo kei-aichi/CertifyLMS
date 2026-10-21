@@ -6,7 +6,6 @@ namespace Tests\Feature\Http\Meeting;
 
 use App\Enums\MeetingQuotaTransactionType;
 use App\Enums\MeetingStatus;
-use App\Http\Controllers\MeetingController;
 use App\Models\Certification;
 use App\Models\CoachAvailability;
 use App\Models\Enrollment;
@@ -18,8 +17,10 @@ use App\Services\CoachMeetingLoadService;
 use App\Services\GoogleCalendarService;
 use App\Services\MeetingAvailabilityService;
 use App\Services\MeetingQuotaService;
+use App\UseCases\Meeting\CancelAction;
 use App\UseCases\Meeting\ReserveAction;
 use App\UseCases\MeetingQuota\ConsumeQuotaAction;
+use App\UseCases\MeetingQuota\RefundQuotaAction;
 use Carbon\Carbon;
 use Closure;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -798,9 +799,10 @@ class MeetingControllerTest extends TestCase
 
     private function invokeDeleteGoogleEventAfterCommit(Meeting $meeting, GoogleCalendarService $google): void
     {
-        $method = new \ReflectionMethod(app(MeetingController::class), 'deleteGoogleEventAfterCommit');
+        $action = new CancelAction(app(RefundQuotaAction::class), $google);
+        $method = new \ReflectionMethod($action, 'deleteGoogleEventAfterCommit');
         $method->setAccessible(true);
-        $method->invoke(app(MeetingController::class), $meeting->fresh(), $google);
+        $method->invoke($action, $meeting->fresh());
     }
 
     public function test_cancel_rejects_when_quota_transaction_id_is_null(): void

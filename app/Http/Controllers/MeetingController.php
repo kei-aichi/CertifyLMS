@@ -5,12 +5,6 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Enums\EnrollmentStatus;
-use App\Enums\MeetingQuotaTransactionType;
-use App\Enums\MeetingStatus;
-use App\Enums\UserStatus;
-use App\Exceptions\MeetingQuota\MeetingQuotaTransactionMismatchException;
-use App\Exceptions\Mentoring\MeetingAlreadyStartedException;
-use App\Exceptions\Mentoring\MeetingStatusTransitionException;
 use App\Http\Requests\Meeting\AvailabilityRequest;
 use App\Http\Requests\Meeting\IndexAsCoachRequest;
 use App\Http\Requests\Meeting\IndexRequest;
@@ -18,32 +12,26 @@ use App\Http\Requests\Meeting\StoreRequest;
 use App\Http\Requests\Meeting\UpsertMemoRequest;
 use App\Models\Enrollment;
 use App\Models\Meeting;
-use App\Models\MeetingQuotaTransaction;
-use App\Models\User;
-use App\Notifications\MeetingCanceledNotification;
-use App\Services\GoogleCalendarService;
 use App\Services\MeetingQuotaService;
+use App\UseCases\Meeting\CancelAction;
 use App\UseCases\Meeting\FetchAvailabilityAction;
 use App\UseCases\Meeting\ListCoachMeetingsAction;
 use App\UseCases\Meeting\ListStudentMeetingsAction;
 use App\UseCases\Meeting\ReserveAction;
 use App\UseCases\Meeting\ShowAction;
 use App\UseCases\Meeting\UpsertMemoAction;
-use App\UseCases\MeetingQuota\RefundQuotaAction;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 use Illuminate\View\View;
 
 /**
  * 1on1 面談予約 (Meeting) の HTTP エントリポイント。
  *
  * 受講生視点(index / show / create / store / cancel / fetchAvailability)とコーチ視点
- * (indexAsCoach / upsertMemo)を 1 Controller に集約する。予約 / キャンセル / メモ保存の
- * 状態変更系は残面談回数の消費・返却、通知発火、トランザクション境界を method 内で扱い、
- * Controller はリクエスト受付、認可、Action 呼び出し、レスポンス整形を担当する。
+ * (indexAsCoach / upsertMemo)を 1 Controller に集約する。状態変更系の業務処理と
+ * トランザクション境界は各 Action が扱い、Controller はリクエスト受付、認可、
+ * Action 呼び出し、レスポンス整形を担当する。
  * 認可は $this->authorize() または FormRequest::authorize()。
  */
 class MeetingController extends Controller
@@ -155,78 +143,11 @@ class MeetingController extends Controller
      */
     public function cancel(
         Meeting $meeting,
-        RefundQuotaAction $refundAction,
-        GoogleCalendarService $googleCalendar,
+        CancelAction $action,
     ): RedirectResponse {
         $this->authorize('cancel', $meeting);
 
-        $actor = auth()->user();
-        $coachId = $meeting->coach_id;
-
-        $canceledMeeting = DB::transaction(function () use ($meeting, $actor, $refundAction, $coachId) {
-            // 予約処理と同じ順序で、コーチUser行を先にロックする。
-            User::query()
-                ->whereKey($coachId)
-                ->lockForUpdate()
-                ->firstOrFail();
-
-            $locked = Meeting::query()->whereKey($meeting->id)->lockForUpdate()->first();
-            if (
-                $locked === null
-                || $locked->coach_id !== $coachId
-                || $locked->status !== MeetingStatus::Reserved
-            ) {
-                throw MeetingStatusTransitionException::forCancel();
-            }
-
-            // Route Model Binding直後の認可結果だけに依存せず、ロック後の最新状態で再確認する。
-            $this->authorize('cancel', $locked);
-
-            if ($locked->scheduled_at->lessThanOrEqualTo(now())) {
-                throw new MeetingAlreadyStartedException;
-            }
-
-            $transaction = $locked->meeting_quota_transaction_id === null
-                ? null
-                : MeetingQuotaTransaction::query()
-                    ->whereKey($locked->meeting_quota_transaction_id)
-                    ->first();
-
-            if (
-                $transaction === null
-                || $transaction->user_id !== $locked->student_id
-                || $transaction->related_meeting_id !== $locked->id
-                || $transaction->type !== MeetingQuotaTransactionType::Consumed
-                || $transaction->amount !== -1
-            ) {
-                throw new MeetingQuotaTransactionMismatchException;
-            }
-
-            $locked->update([
-                'status' => MeetingStatus::Canceled->value,
-                'canceled_by_user_id' => $actor->id,
-                'canceled_at' => now(),
-            ]);
-
-            $refundAction($locked->student, $locked->id);
-
-            DB::afterCommit(function () use ($locked, $actor): void {
-                $locked->loadMissing(['coach', 'student', 'canceledBy']);
-                $recipient = match ($actor->id) {
-                    $locked->student_id => $locked->coach,
-                    $locked->coach_id => $locked->student,
-                    default => null,
-                };
-
-                if ($recipient !== null && $recipient->status === UserStatus::InProgress) {
-                    $recipient->notify(new MeetingCanceledNotification($locked));
-                }
-            });
-
-            return $locked->fresh();
-        });
-
-        $this->deleteGoogleEventAfterCommit($canceledMeeting, $googleCalendar);
+        $action($meeting, auth()->user());
 
         return redirect()
             ->route('meetings.show', $meeting)
@@ -264,45 +185,5 @@ class MeetingController extends Controller
                 'available_coach_count' => $slot['available_coach_count'],
             ])->all(),
         ]);
-    }
-
-    private function deleteGoogleEventAfterCommit(Meeting $meeting, GoogleCalendarService $googleCalendar): void
-    {
-        if ($meeting->google_event_id === null || $meeting->google_connection_id === null) {
-            return;
-        }
-
-        $credential = $meeting->coach?->googleCredential;
-        if ($credential === null) {
-            return;
-        }
-
-        $apiConnectionId = (string) $meeting->google_connection_id;
-        $eventId = (string) $meeting->google_event_id;
-
-        try {
-            $googleCalendar->deleteEvent($credential, $apiConnectionId, $eventId);
-
-            $latest = Meeting::query()
-                ->with('coach.googleCredential')
-                ->find($meeting->getKey());
-            $currentConnectionId = $latest?->coach?->googleCredential?->getKey();
-
-            if ($latest === null || $currentConnectionId !== $apiConnectionId) {
-                Log::warning('Google event deletion completed after connection state changed.', [
-                    'operation' => 'event_delete_state_changed',
-                    'meeting_id' => $meeting->getKey(),
-                    'connection_id' => $apiConnectionId,
-                    'error_class' => 'connection_state_changed',
-                ]);
-            }
-        } catch (\Throwable $exception) {
-            Log::warning('Google Calendar event deletion failed.', [
-                'operation' => 'event_delete',
-                'meeting_id' => $meeting->getKey(),
-                'connection_id' => $meeting->google_connection_id,
-                'error_class' => $exception::class,
-            ]);
-        }
     }
 }
