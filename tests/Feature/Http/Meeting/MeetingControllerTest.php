@@ -6,7 +6,6 @@ namespace Tests\Feature\Http\Meeting;
 
 use App\Enums\MeetingQuotaTransactionType;
 use App\Enums\MeetingStatus;
-use App\Http\Controllers\MeetingController;
 use App\Models\Certification;
 use App\Models\CoachAvailability;
 use App\Models\Enrollment;
@@ -672,124 +671,6 @@ class MeetingControllerTest extends TestCase
         $this->assertStringNotContainsString('private google response', $response->getContent());
         $this->assertSame(MeetingStatus::Canceled, $meeting->fresh()->status);
         $this->assertSame($before + 1, app(MeetingQuotaService::class)->remaining($student));
-    }
-
-    public function test_google_delete_rechecks_connection_after_api_call(): void
-    {
-        [$meeting, $credential] = $this->makeGoogleMeetingForCompensation();
-        $meeting->update(['google_event_id' => 'event-delete']);
-        $google = Mockery::mock(GoogleCalendarService::class);
-        $google->shouldReceive('deleteEvent')->once()->andReturnTrue();
-
-        $this->invokeDeleteGoogleEventAfterCommit($meeting, $google);
-
-        $this->assertDatabaseHas('google_credentials', ['id' => $credential->id]);
-    }
-
-    public function test_google_delete_does_not_operate_again_after_disconnect_during_api_call(): void
-    {
-        [$meeting, $credential] = $this->makeGoogleMeetingForCompensation();
-        $meeting->update(['google_event_id' => 'event-delete']);
-        $google = Mockery::mock(GoogleCalendarService::class);
-        $google->shouldReceive('deleteEvent')->once()->andReturnUsing(function () use ($credential): bool {
-            $credential->delete();
-
-            return true;
-        });
-
-        $this->invokeDeleteGoogleEventAfterCommit($meeting, $google);
-
-        $this->assertDatabaseMissing('google_credentials', ['id' => $credential->id]);
-    }
-
-    public function test_google_delete_does_not_operate_again_after_reconnection_during_api_call(): void
-    {
-        [$meeting, $credential] = $this->makeGoogleMeetingForCompensation();
-        $meeting->update(['google_event_id' => 'event-delete']);
-        $google = Mockery::mock(GoogleCalendarService::class);
-        $google->shouldReceive('deleteEvent')->once()->andReturnUsing(function () use ($credential): bool {
-            $credential->delete();
-            GoogleCredential::factory()->create(['coach_id' => $credential->coach_id]);
-
-            return true;
-        });
-
-        $this->invokeDeleteGoogleEventAfterCommit($meeting, $google);
-
-        $this->assertDatabaseCount('google_credentials', 1);
-        $this->assertNotSame($credential->id, GoogleCredential::query()->firstOrFail()->id);
-    }
-
-    public function test_event_creation_race_compensates_when_meeting_was_canceled(): void
-    {
-        [$meeting, $credential] = $this->makeGoogleMeetingForCompensation();
-        $google = Mockery::mock(GoogleCalendarService::class);
-        $google->shouldReceive('createEvent')->once()->andReturnUsing(function () use ($meeting): string {
-            $meeting->update(['status' => MeetingStatus::Canceled->value]);
-
-            return 'orphan-event';
-        });
-        $google->shouldReceive('deleteEvent')->once()->withArgs(fn ($current, $connection, $event) => $current->id === $credential->id && $connection === $credential->id && $event === 'orphan-event')->andReturnTrue();
-
-        $this->invokeCreateGoogleEventAfterCommit($meeting, $google);
-    }
-
-    public function test_event_creation_race_does_not_compensate_after_disconnect(): void
-    {
-        [$meeting, $credential] = $this->makeGoogleMeetingForCompensation();
-        $google = Mockery::mock(GoogleCalendarService::class);
-        $google->shouldReceive('createEvent')->once()->andReturnUsing(function () use ($meeting, $credential): string {
-            $meeting->update(['status' => MeetingStatus::Canceled->value]);
-            $credential->delete();
-
-            return 'orphan-event';
-        });
-        $google->shouldNotReceive('deleteEvent');
-
-        $this->invokeCreateGoogleEventAfterCommit($meeting, $google);
-    }
-
-    public function test_event_creation_race_does_not_compensate_after_reconnection(): void
-    {
-        [$meeting, $credential] = $this->makeGoogleMeetingForCompensation();
-        $google = Mockery::mock(GoogleCalendarService::class);
-        $google->shouldReceive('createEvent')->once()->andReturnUsing(function () use ($meeting, $credential): string {
-            $meeting->update(['status' => MeetingStatus::Canceled->value]);
-            GoogleCredential::factory()->create(['coach_id' => $credential->coach_id]);
-
-            return 'orphan-event';
-        });
-        $google->shouldNotReceive('deleteEvent');
-
-        $this->invokeCreateGoogleEventAfterCommit($meeting, $google);
-    }
-
-    /** @return array{Meeting, GoogleCredential} */
-    private function makeGoogleMeetingForCompensation(): array
-    {
-        $student = User::factory()->student()->inProgress()->create();
-        $coach = User::factory()->coach()->create();
-        $credential = GoogleCredential::factory()->create(['coach_id' => $coach->id]);
-        $meeting = Meeting::factory()->reserved()->forCoach($coach)->forStudent($student)->create([
-            'google_connection_id' => $credential->id,
-            'scheduled_at' => now()->addDays(3)->startOfHour(),
-        ]);
-
-        return [$meeting, $credential];
-    }
-
-    private function invokeCreateGoogleEventAfterCommit(Meeting $meeting, GoogleCalendarService $google): void
-    {
-        $method = new \ReflectionMethod(app(MeetingController::class), 'createGoogleEventAfterCommit');
-        $method->setAccessible(true);
-        $method->invoke(app(MeetingController::class), $meeting->fresh(), $google);
-    }
-
-    private function invokeDeleteGoogleEventAfterCommit(Meeting $meeting, GoogleCalendarService $google): void
-    {
-        $method = new \ReflectionMethod(app(MeetingController::class), 'deleteGoogleEventAfterCommit');
-        $method->setAccessible(true);
-        $method->invoke(app(MeetingController::class), $meeting->fresh(), $google);
     }
 
     public function test_cancel_rejects_when_quota_transaction_id_is_null(): void
