@@ -8,7 +8,7 @@ use Illuminate\Notifications\DatabaseNotification;
 use Illuminate\Support\Facades\Route;
 use Throwable;
 
-final class NotificationRedirectUrlResolver
+final class NotificationRedirectUrlAction
 {
     public function __invoke(DatabaseNotification $notification): string
     {

@@ -16,6 +16,6 @@ final class MarkAsReadAction
 
         $notification->markAsRead();
 
-        return (new NotificationRedirectUrlResolver())($notification);
+        return (new NotificationRedirectUrlAction())($notification);
     }
 }

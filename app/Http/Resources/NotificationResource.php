@@ -7,7 +7,7 @@ namespace App\Http\Resources;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Notifications\DatabaseNotification;
-use App\UseCases\Notification\NotificationRedirectUrlResolver;
+use App\UseCases\Notification\NotificationRedirectUrlAction;
 
 /** @mixin DatabaseNotification */
 final class NotificationResource extends JsonResource
@@ -28,7 +28,7 @@ final class NotificationResource extends JsonResource
             'relative_time' => $this->created_at?->diffForHumans(),
             'read_at' => $readAt?->toIso8601String(),
             'is_unread' => $readAt === null,
-            'redirect_url' => (new NotificationRedirectUrlResolver())($this->resource),
+            'redirect_url' => (new NotificationRedirectUrlAction())($this->resource),
         ];
     }
 
