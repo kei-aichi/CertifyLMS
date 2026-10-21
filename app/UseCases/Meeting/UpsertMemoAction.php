@@ -12,9 +12,9 @@ use Illuminate\Support\Facades\DB;
 
 final class UpsertMemoAction
 {
-    public function __invoke(Meeting $meeting, string $body): void
+    public function __invoke(Meeting $meeting, string $body): MeetingMemo
     {
-        DB::transaction(function () use ($meeting, $body): void {
+        return DB::transaction(function () use ($meeting, $body): MeetingMemo {
             if (! in_array($meeting->status, [
                 MeetingStatus::Reserved,
                 MeetingStatus::Completed,
@@ -22,7 +22,7 @@ final class UpsertMemoAction
                 throw MeetingStatusTransitionException::forMemo();
             }
 
-            MeetingMemo::updateOrCreate(
+            return MeetingMemo::updateOrCreate(
                 ['meeting_id' => $meeting->id],
                 ['body' => $body],
             );

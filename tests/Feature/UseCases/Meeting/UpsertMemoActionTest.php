@@ -19,20 +19,23 @@ final class UpsertMemoActionTest extends TestCase
     {
         $meeting = Meeting::factory()->reserved()->create();
 
-        app(UpsertMemoAction::class)($meeting, '予約済み面談のメモ');
+        $memo = app(UpsertMemoAction::class)($meeting, '予約済み面談のメモ');
 
+        $this->assertInstanceOf(MeetingMemo::class, $memo);
         $this->assertDatabaseHas('meeting_memos', [
             'meeting_id' => $meeting->id,
             'body' => '予約済み面談のメモ',
         ]);
+        $this->assertSame($memo->id, MeetingMemo::query()->where('meeting_id', $meeting->id)->value('id'));
     }
 
     public function test_creates_memo_for_completed_meeting(): void
     {
         $meeting = Meeting::factory()->completed()->create();
 
-        app(UpsertMemoAction::class)($meeting, '完了面談のメモ');
+        $memo = app(UpsertMemoAction::class)($meeting, '完了面談のメモ');
 
+        $this->assertInstanceOf(MeetingMemo::class, $memo);
         $this->assertDatabaseHas('meeting_memos', [
             'meeting_id' => $meeting->id,
             'body' => '完了面談のメモ',
@@ -46,8 +49,10 @@ final class UpsertMemoActionTest extends TestCase
         $otherMeeting = Meeting::factory()->completed()->create();
         MeetingMemo::factory()->forMeeting($otherMeeting)->create(['body' => '別面談のメモ']);
 
-        app(UpsertMemoAction::class)($meeting, '更新後メモ');
+        $updated = app(UpsertMemoAction::class)($meeting, '更新後メモ');
 
+        $this->assertInstanceOf(MeetingMemo::class, $updated);
+        $this->assertSame($memo->id, $updated->id);
         $this->assertDatabaseHas('meeting_memos', [
             'id' => $memo->id,
             'meeting_id' => $meeting->id,
