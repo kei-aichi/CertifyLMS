@@ -30,6 +30,10 @@ use App\Services\CoachMeetingLoadService;
 use App\Services\GoogleCalendarService;
 use App\Services\MeetingAvailabilityService;
 use App\Services\MeetingQuotaService;
+use App\UseCases\Meeting\FetchAvailabilityAction;
+use App\UseCases\Meeting\ListCoachMeetingsAction;
+use App\UseCases\Meeting\ListStudentMeetingsAction;
+use App\UseCases\Meeting\ShowAction;
 use App\UseCases\MeetingQuota\ConsumeQuotaAction;
 use App\UseCases\MeetingQuota\RefundQuotaAction;
 use Carbon\Carbon;
@@ -46,80 +50,51 @@ use Illuminate\View\View;
  * 受講生視点(index / show / create / store / cancel / fetchAvailability)とコーチ視点
  * (indexAsCoach / upsertMemo)を 1 Controller に集約する。予約 / キャンセル / メモ保存の
  * 状態変更系は残面談回数の消費・返却、通知発火、トランザクション境界を method 内で扱い、
- * 取得系はクエリ組み立てを method 内で行う。認可は $this->authorize() または FormRequest::authorize()。
+ * Controller はリクエスト受付、認可、Action 呼び出し、レスポンス整形を担当する。
+ * 認可は $this->authorize() または FormRequest::authorize()。
  */
 class MeetingController extends Controller
 {
     /**
      * 受講生本人の面談一覧。filter (upcoming/past/all) クエリで履歴を切り替える。
      */
-    public function index(IndexRequest $request, MeetingQuotaService $meetingQuota): View
+    public function index(IndexRequest $request, ListStudentMeetingsAction $action): View
     {
         $filter = $request->validated('filter') ?? 'upcoming';
 
-        $query = Meeting::query()
-            ->with(['enrollment.certification', 'coach'])
-            ->forStudent($request->user())
-            ->orderByDesc('scheduled_at');
-
-        $meetings = match ($filter) {
-            'past' => $query->past()->paginate(20),
-            'all' => $query->paginate(20),
-            default => $query->upcoming()->paginate(20),
-        };
+        $result = $action($request->user(), $filter);
 
         return view('meeting.index', [
-            'meetings' => $meetings,
-            'filter' => $filter,
-            'meetingsRemaining' => $meetingQuota->remaining($request->user()),
+            'meetings' => $result->meetings,
+            'filter' => $result->filter,
+            'meetingsRemaining' => $result->meetingsRemaining,
         ]);
     }
 
     /**
      * コーチ宛の面談一覧。担当受講生 / 受講登録での絞り込みを併せて提供する。
      */
-    public function indexAsCoach(IndexAsCoachRequest $request): View
+    public function indexAsCoach(IndexAsCoachRequest $request, ListCoachMeetingsAction $action): View
     {
         $filters = $request->validated();
-        $filter = $filters['filter'] ?? 'upcoming';
-        $studentId = $filters['student'] ?? null;
-        $enrollmentId = $filters['enrollment'] ?? null;
-
-        $query = Meeting::query()
-            ->with(['enrollment.certification', 'student'])
-            ->forCoach($request->user())
-            ->when($studentId, fn ($q, $id) => $q->where('student_id', $id))
-            ->when($enrollmentId, fn ($q, $id) => $q->where('enrollment_id', $id));
-
-        // upcoming: 次の面談を一番上に置く (昇順) / past + all: 直近の活動を一番上 (降順)
-        $meetings = match ($filter) {
-            'past' => $query->past()->orderByDesc('scheduled_at')->paginate(20),
-            'all' => $query->orderByDesc('scheduled_at')->paginate(20),
-            default => $query->upcoming()->orderBy('scheduled_at')->paginate(20),
-        };
+        $result = $action($request->user(), $filters);
 
         return view('meeting.coach.index', [
-            'meetings' => $meetings,
-            'filter' => $filter,
-            'studentFilter' => $studentId,
-            'enrollmentFilter' => $enrollmentId,
+            'meetings' => $result['meetings'],
+            'filter' => $result['filter'],
+            'studentFilter' => $result['studentFilter'],
+            'enrollmentFilter' => $result['enrollmentFilter'],
         ]);
     }
 
     /**
      * 面談詳細(当事者共通)。Policy で coach/student の閲覧範囲を絞る。
      */
-    public function show(Meeting $meeting): View
+    public function show(Meeting $meeting, ShowAction $action): View
     {
         $this->authorize('view', $meeting);
 
-        $meeting->loadMissing([
-            'enrollment.certification',
-            'coach',
-            'student',
-            'canceledBy',
-            'meetingMemo',
-        ]);
+        $meeting = $action($meeting);
 
         return view('meeting.show', [
             'meeting' => $meeting,
@@ -376,13 +351,11 @@ class MeetingController extends Controller
     /**
      * 予約画面が呼ぶ空き枠取得 JSON エンドポイント。
      */
-    public function fetchAvailability(Enrollment $enrollment, AvailabilityRequest $request, MeetingAvailabilityService $availabilityService): JsonResponse
+    public function fetchAvailability(Enrollment $enrollment, AvailabilityRequest $request, FetchAvailabilityAction $action): JsonResponse
     {
-        $date = Carbon::parse($request->validated('date'));
-        $slots = $availabilityService->slotsForCertification(
-            $enrollment->loadMissing('certification')->certification,
-            $date,
-        );
+        $result = $action($enrollment, $request->validated('date'));
+        $date = $result['date'];
+        $slots = $result['slots'];
 
         return response()->json([
             'date' => $date->toDateString(),
