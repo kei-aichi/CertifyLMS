@@ -8,16 +8,20 @@ use App\Enums\MeetingQuotaTransactionType;
 use App\Enums\MeetingStatus;
 use App\Exceptions\Mentoring\MeetingAlreadyStartedException;
 use App\Exceptions\Mentoring\MeetingStatusTransitionException;
+use App\Models\GoogleCredential;
 use App\Models\Meeting;
 use App\Models\MeetingQuotaTransaction;
 use App\Models\User;
 use App\Notifications\MeetingCanceledNotification;
+use App\Services\GoogleCalendarService;
 use App\Services\MeetingQuotaService;
 use App\UseCases\Meeting\CancelAction;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Auth\Access\AuthorizationException;
+use Mockery;
 use RuntimeException;
 use Tests\TestCase;
 
@@ -130,6 +134,92 @@ final class CancelActionTest extends TestCase
         $this->assertDatabaseCount('meeting_quota_transactions', 1);
     }
 
+    public function test_public_action_rechecks_connection_after_google_delete(): void
+    {
+        Notification::fake();
+        [$meeting, , , $credential] = $this->googleCancelableMeeting();
+        $google = Mockery::mock(GoogleCalendarService::class);
+        $google->shouldReceive('deleteEvent')->once()->withArgs(
+            fn (GoogleCredential $current, string $connectionId, string $eventId): bool =>
+                $current->is($credential)
+                && $connectionId === (string) $credential->id
+                && $eventId === 'event-delete'
+        )->andReturnTrue();
+        $this->app->instance(GoogleCalendarService::class, $google);
+
+        app(CancelAction::class)($meeting, $meeting->student);
+
+        $this->assertDatabaseHas('google_credentials', ['id' => $credential->id]);
+    }
+
+    public function test_public_action_does_not_operate_again_after_google_disconnect_during_delete(): void
+    {
+        Notification::fake();
+        [$meeting, , , $credential] = $this->googleCancelableMeeting();
+        Log::spy();
+        $google = Mockery::mock(GoogleCalendarService::class);
+        $google->shouldReceive('deleteEvent')->once()->withArgs(
+            fn (GoogleCredential $current, string $connectionId, string $eventId): bool =>
+                $current->is($credential)
+                && $connectionId === (string) $credential->id
+                && $eventId === 'event-delete'
+        )->andReturnUsing(function () use ($credential): bool {
+            $credential->delete();
+
+            return true;
+        });
+        $this->app->instance(GoogleCalendarService::class, $google);
+
+        app(CancelAction::class)($meeting, $meeting->student);
+
+        $this->assertDatabaseMissing('google_credentials', ['id' => $credential->id]);
+        Log::shouldHaveReceived('warning')->once()->with(
+            'Google event deletion completed after connection state changed.',
+            Mockery::on(fn (array $context): bool =>
+                $context['operation'] === 'event_delete_state_changed'
+                && $context['meeting_id'] === $meeting->id
+                && $context['connection_id'] === $credential->id
+                && $context['error_class'] === 'connection_state_changed'
+            )
+        );
+    }
+
+    public function test_public_action_does_not_operate_again_after_google_reconnection_during_delete(): void
+    {
+        Notification::fake();
+        [$meeting, , $coach, $credential] = $this->googleCancelableMeeting();
+        Log::spy();
+        $google = Mockery::mock(GoogleCalendarService::class);
+        $google->shouldReceive('deleteEvent')->once()->withArgs(
+            fn (GoogleCredential $current, string $connectionId, string $eventId): bool =>
+                $current->is($credential)
+                && $connectionId === (string) $credential->id
+                && $eventId === 'event-delete'
+        )->andReturnUsing(function () use ($coach, $credential): bool {
+            $credential->delete();
+            $newCredential = GoogleCredential::factory()->for($coach, 'coach')->create();
+
+            $this->assertNotSame($credential->id, $newCredential->id);
+
+            return true;
+        });
+        $this->app->instance(GoogleCalendarService::class, $google);
+
+        app(CancelAction::class)($meeting, $meeting->student);
+
+        $this->assertDatabaseCount('google_credentials', 1);
+        $this->assertDatabaseMissing('google_credentials', ['id' => $credential->id]);
+        Log::shouldHaveReceived('warning')->once()->with(
+            'Google event deletion completed after connection state changed.',
+            Mockery::on(fn (array $context): bool =>
+                $context['operation'] === 'event_delete_state_changed'
+                && $context['meeting_id'] === $meeting->id
+                && $context['connection_id'] === $credential->id
+                && $context['error_class'] === 'connection_state_changed'
+            )
+        );
+    }
+
     /** @param array<string, mixed> $overrides */
     private function cancelableMeeting(array $overrides = []): array
     {
@@ -145,5 +235,18 @@ final class CancelActionTest extends TestCase
         $meeting->update(['meeting_quota_transaction_id' => $consumed->id]);
 
         return [$meeting->fresh(), $student, $coach, $consumed];
+    }
+
+    /** @return array{Meeting, User, User, GoogleCredential} */
+    private function googleCancelableMeeting(): array
+    {
+        [$meeting, $student, $coach] = $this->cancelableMeeting();
+        $credential = GoogleCredential::factory()->for($coach, 'coach')->create();
+        $meeting->update([
+            'google_connection_id' => $credential->id,
+            'google_event_id' => 'event-delete',
+        ]);
+
+        return [$meeting->fresh(), $student, $coach, $credential];
     }
 }
