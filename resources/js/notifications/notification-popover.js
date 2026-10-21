@@ -95,20 +95,26 @@ export function initNotificationPopovers() {
         };
 
         const close = () => {
-            panel.classList.add('hidden');
+            panel.classList.add('hidden', 'opacity-0', '-translate-y-1');
+            panel.classList.remove('opacity-100', 'translate-y-0');
             panel.style.display = 'none';
             trigger.setAttribute('aria-expanded', 'false');
         };
 
+        const open = () => {
+            panel.classList.remove('hidden', 'opacity-0', '-translate-y-1');
+            panel.classList.add('opacity-100', 'translate-y-0');
+            panel.style.display = 'flex';
+            trigger.setAttribute('aria-expanded', 'true');
+        };
+
         trigger.addEventListener('click', async () => {
-            const open = !panel.classList.contains('hidden');
-            if (open) {
+            const isOpen = !panel.classList.contains('hidden');
+            if (isOpen) {
                 close();
                 return;
             }
-            panel.classList.remove('hidden');
-            panel.style.display = 'flex';
-            trigger.setAttribute('aria-expanded', 'true');
+            open();
             await load();
         });
 
