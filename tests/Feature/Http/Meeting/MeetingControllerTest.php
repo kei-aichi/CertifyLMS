@@ -14,8 +14,12 @@ use App\Models\GoogleCredential;
 use App\Models\Meeting;
 use App\Models\MeetingQuotaTransaction;
 use App\Models\User;
+use App\Services\CoachMeetingLoadService;
 use App\Services\GoogleCalendarService;
+use App\Services\MeetingAvailabilityService;
 use App\Services\MeetingQuotaService;
+use App\UseCases\Meeting\ReserveAction;
+use App\UseCases\MeetingQuota\ConsumeQuotaAction;
 use Carbon\Carbon;
 use Closure;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -780,9 +784,16 @@ class MeetingControllerTest extends TestCase
 
     private function invokeCreateGoogleEventAfterCommit(Meeting $meeting, GoogleCalendarService $google): void
     {
-        $method = new \ReflectionMethod(app(MeetingController::class), 'createGoogleEventAfterCommit');
+        $action = new ReserveAction(
+            app(MeetingAvailabilityService::class),
+            app(CoachMeetingLoadService::class),
+            app(MeetingQuotaService::class),
+            app(ConsumeQuotaAction::class),
+            $google,
+        );
+        $method = new \ReflectionMethod($action, 'createGoogleEventAfterCommit');
         $method->setAccessible(true);
-        $method->invoke(app(MeetingController::class), $meeting->fresh(), $google);
+        $method->invoke($action, $meeting->fresh());
     }
 
     private function invokeDeleteGoogleEventAfterCommit(Meeting $meeting, GoogleCalendarService $google): void

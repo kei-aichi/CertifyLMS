@@ -8,38 +8,31 @@ use App\Enums\EnrollmentStatus;
 use App\Enums\MeetingQuotaTransactionType;
 use App\Enums\MeetingStatus;
 use App\Enums\UserStatus;
-use App\Exceptions\MeetingQuota\InsufficientMeetingQuotaException;
 use App\Exceptions\MeetingQuota\MeetingQuotaTransactionMismatchException;
 use App\Exceptions\Mentoring\MeetingAlreadyStartedException;
-use App\Exceptions\Mentoring\MeetingNoAvailableCoachException;
 use App\Exceptions\Mentoring\MeetingStatusTransitionException;
 use App\Http\Requests\Meeting\AvailabilityRequest;
 use App\Http\Requests\Meeting\IndexAsCoachRequest;
 use App\Http\Requests\Meeting\IndexRequest;
 use App\Http\Requests\Meeting\StoreRequest;
 use App\Http\Requests\Meeting\UpsertMemoRequest;
-use App\Models\Certification;
 use App\Models\Enrollment;
 use App\Models\Meeting;
 use App\Models\MeetingQuotaTransaction;
 use App\Models\User;
 use App\Notifications\MeetingCanceledNotification;
-use App\Notifications\MeetingReservedNotification;
-use App\Services\CoachMeetingLoadService;
 use App\Services\GoogleCalendarService;
-use App\Services\MeetingAvailabilityService;
 use App\Services\MeetingQuotaService;
 use App\UseCases\Meeting\FetchAvailabilityAction;
 use App\UseCases\Meeting\ListCoachMeetingsAction;
 use App\UseCases\Meeting\ListStudentMeetingsAction;
+use App\UseCases\Meeting\ReserveAction;
 use App\UseCases\Meeting\ShowAction;
 use App\UseCases\Meeting\UpsertMemoAction;
-use App\UseCases\MeetingQuota\ConsumeQuotaAction;
 use App\UseCases\MeetingQuota\RefundQuotaAction;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
-use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\View\View;
@@ -145,96 +138,11 @@ class MeetingController extends Controller
     public function store(
         Enrollment $enrollment,
         StoreRequest $request,
-        MeetingAvailabilityService $availabilityService,
-        CoachMeetingLoadService $coachLoadService,
-        MeetingQuotaService $quotaService,
-        ConsumeQuotaAction $consumeAction,
-        GoogleCalendarService $googleCalendar,
+        ReserveAction $action,
     ): RedirectResponse {
         $scheduledAt = Carbon::parse($request->validated('scheduled_at'));
         $topic = $request->validated('topic');
-        $student = $enrollment->user;
-        $initialCandidates = $this->findAvailableCoaches($enrollment->certification, $scheduledAt);
-        $googleBusyCoachIds = $this->googleBusyCoachIds($initialCandidates, $scheduledAt, $googleCalendar);
-
-        $meeting = DB::transaction(function () use (
-            $enrollment,
-            $student,
-            $scheduledAt,
-            $topic,
-            $availabilityService,
-            $coachLoadService,
-            $quotaService,
-            $consumeAction,
-            $googleBusyCoachIds,
-        ) {
-            if ($quotaService->remaining($student) < 1) {
-                throw new InsufficientMeetingQuotaException;
-            }
-
-            $availabilityService->validateSlot($enrollment->certification, $scheduledAt);
-
-            $candidateIds = $this->findAvailableCoaches($enrollment->certification, $scheduledAt)
-                ->pluck('id')
-                ->sort()
-                ->reject(fn (string $coachId): bool => $googleBusyCoachIds->contains($coachId))
-                ->values();
-
-            if ($candidateIds->isEmpty()) {
-                throw new MeetingNoAvailableCoachException;
-            }
-
-            // 全リクエストでコーチID昇順にUser行をロックし、候補判定を直列化する。
-            // ロック取得後のMeeting確認は lockForUpdate() による current read とする。
-            $lockedCandidates = $candidateIds->map(function (string $coachId): User {
-                return User::query()
-                    ->whereKey($coachId)
-                    ->lockForUpdate()
-                    ->firstOrFail();
-            });
-
-            $availableCandidates = $lockedCandidates->filter(function (User $coach) use ($scheduledAt): bool {
-                return ! Meeting::query()
-                    ->where('coach_id', $coach->id)
-                    ->where('scheduled_at', $scheduledAt)
-                    ->whereIn('status', [MeetingStatus::Reserved->value, MeetingStatus::Completed->value])
-                    ->lockForUpdate()
-                    ->exists();
-            })->values();
-
-            if ($availableCandidates->isEmpty()) {
-                throw new MeetingNoAvailableCoachException;
-            }
-
-            $coach = $coachLoadService->leastLoadedCoach($availableCandidates);
-
-            $meeting = Meeting::create([
-                'enrollment_id' => $enrollment->id,
-                'coach_id' => $coach->id,
-                'student_id' => $student->id,
-                'scheduled_at' => $scheduledAt,
-                'status' => MeetingStatus::Reserved->value,
-                'topic' => $topic,
-                'meeting_url_snapshot' => $coach->meeting_url,
-                'google_connection_id' => $coach->googleCredential()->value('id'),
-            ]);
-
-            $transaction = ($consumeAction)($student, $meeting->id);
-            $meeting->update(['meeting_quota_transaction_id' => $transaction->id]);
-
-            DB::afterCommit(function () use ($meeting): void {
-                $meeting->loadMissing('coach');
-                $coach = $meeting->coach;
-
-                if ($coach !== null && $coach->status === UserStatus::InProgress) {
-                    $coach->notify(new MeetingReservedNotification($meeting));
-                }
-            });
-
-            return $meeting->fresh();
-        });
-
-        $this->createGoogleEventAfterCommit($meeting, $googleCalendar);
+        $meeting = $action($enrollment, $scheduledAt, $topic);
 
         return redirect()
             ->route('meetings.show', $meeting)
@@ -356,131 +264,6 @@ class MeetingController extends Controller
                 'available_coach_count' => $slot['available_coach_count'],
             ])->all(),
         ]);
-    }
-
-    /**
-     * 担当コーチ集合のうち、(1) 当該時刻に有効な availability 枠があり、
-     * (2) 当該時刻に reserved / completed の Meeting を持たないコーチ集合を返す。
-     *
-     * @return Collection<int, User>
-     */
-    private function findAvailableCoaches(Certification $certification, Carbon $scheduledAt): Collection
-    {
-        $time = $scheduledAt->format('H:i:s');
-
-        return $certification->coaches()
-            ->with('googleCredential')
-            ->whereHas('coachAvailabilities', function ($q) use ($scheduledAt, $time) {
-                $q->where('day_of_week', $scheduledAt->dayOfWeek)
-                    ->where('is_active', true)
-                    ->where('start_time', '<=', $time)
-                    ->where('end_time', '>', $time);
-            })
-            ->whereDoesntHave('meetingsAsCoach', function ($q) use ($scheduledAt) {
-                $q->where('scheduled_at', $scheduledAt)
-                    ->whereIn('status', [MeetingStatus::Reserved->value, MeetingStatus::Completed->value]);
-            })
-            ->get();
-    }
-
-    private function createGoogleEventAfterCommit(Meeting $meeting, GoogleCalendarService $googleCalendar): void
-    {
-        if ($meeting->google_connection_id === null) {
-            return;
-        }
-
-        $credential = $meeting->coach?->googleCredential;
-        if ($credential === null || $credential->getKey() !== $meeting->google_connection_id) {
-            return;
-        }
-
-        try {
-            $eventId = $googleCalendar->createEvent($credential, $meeting);
-            $updated = Meeting::query()
-                ->whereKey($meeting->getKey())
-                ->where('status', MeetingStatus::Reserved->value)
-                ->where('google_connection_id', $credential->getKey())
-                ->whereNull('google_event_id')
-                ->update(['google_event_id' => $eventId, 'google_event_created_at' => now()]);
-
-            if ($updated === 0) {
-                Log::warning('Google event created but Meeting was not updated.', [
-                    'operation' => 'event_create',
-                    'meeting_id' => $meeting->getKey(),
-                    'connection_id' => $credential->getKey(),
-                    'error_class' => 'meeting_state_changed',
-                ]);
-                $this->compensateOrphanedEvent($meeting, $credential, $eventId, $googleCalendar);
-            }
-        } catch (\Throwable $exception) {
-            Log::warning('Google Calendar event creation failed.', [
-                'operation' => 'event_create',
-                'meeting_id' => $meeting->getKey(),
-                'connection_id' => $credential->getKey(),
-                'error_class' => $exception::class,
-            ]);
-            $this->compensateOrphanedEvent($meeting, $credential, isset($eventId) ? $eventId : null, $googleCalendar);
-        }
-    }
-
-    private function googleBusyCoachIds(Collection $candidates, Carbon $scheduledAt, GoogleCalendarService $googleCalendar): Collection
-    {
-        $from = $scheduledAt->copy()->startOfHour();
-        $to = $from->copy()->addHour();
-        $blocked = collect();
-
-        foreach ($candidates as $coach) {
-            $credential = $coach->googleCredential()->first();
-            if ($credential === null) {
-                continue;
-            }
-
-            try {
-                $busy = $googleCalendar->freeBusy($credential, $from, $to);
-                if (collect($busy)->contains(fn (array $period): bool => $scheduledAt->lt($period['end']) && $scheduledAt->copy()->addHour()->gt($period['start'])
-                )) {
-                    $blocked->push((string) $coach->getKey());
-                }
-            } catch (\Throwable $exception) {
-                Log::warning('Google Calendar FreeBusy failed during reservation; using LMS availability.', [
-                    'operation' => 'freebusy_reservation',
-                    'coach_id' => $coach->getKey(),
-                    'connection_id' => $credential->getKey(),
-                    'error_class' => $exception::class,
-                ]);
-            }
-        }
-
-        return $blocked;
-    }
-
-    private function compensateOrphanedEvent(Meeting $meeting, $credential, ?string $eventId, GoogleCalendarService $googleCalendar): void
-    {
-        if ($eventId === null) {
-            return;
-        }
-
-        $latest = Meeting::query()->find($meeting->getKey());
-        if ($latest?->status !== MeetingStatus::Canceled
-            || $latest->google_connection_id !== $credential->getKey()) {
-            return;
-        }
-
-        $currentCredential = $latest->coach?->googleCredential;
-        if ($currentCredential === null || $currentCredential->getKey() !== $credential->getKey()) {
-            return;
-        }
-
-        try {
-            $googleCalendar->deleteEvent($currentCredential, $credential->getKey(), $eventId);
-        } catch (\Throwable $exception) {
-            Log::warning('Google orphan event compensation failed.', [
-                'operation' => 'event_compensation_delete',
-                'meeting_id' => $latest->getKey(),
-                'connection_id' => $credential->getKey(),
-                'error_class' => $exception::class,
-            ]);
-        }
     }
 
     private function deleteGoogleEventAfterCommit(Meeting $meeting, GoogleCalendarService $googleCalendar): void
