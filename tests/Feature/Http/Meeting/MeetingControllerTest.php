@@ -673,20 +673,6 @@ class MeetingControllerTest extends TestCase
         $this->assertSame($before + 1, app(MeetingQuotaService::class)->remaining($student));
     }
 
-    /** @return array{Meeting, GoogleCredential} */
-    private function makeGoogleMeetingForCompensation(): array
-    {
-        $student = User::factory()->student()->inProgress()->create();
-        $coach = User::factory()->coach()->create();
-        $credential = GoogleCredential::factory()->create(['coach_id' => $coach->id]);
-        $meeting = Meeting::factory()->reserved()->forCoach($coach)->forStudent($student)->create([
-            'google_connection_id' => $credential->id,
-            'scheduled_at' => now()->addDays(3)->startOfHour(),
-        ]);
-
-        return [$meeting, $credential];
-    }
-
     public function test_cancel_rejects_when_quota_transaction_id_is_null(): void
     {
         $this->assertCancellationRejected(
