@@ -1,0 +1,27 @@
+T-A-01 改修後Featureテスト・SQL計測結果
+計測日: 2026-10-21
+ブランチ: feature/T-A-01
+HEAD: 511cec6
+
+コマンド:
+./vendor/bin/sail test tests/Feature/Http/MockExam
+
+結果:
+- 20 passed
+- 58 assertions
+- failed: 0
+- skipped: 0
+
+含まれるテスト:
+- MockExamIndexQueryCountTest
+- CrudTest
+- PublishTest
+
+コマンド:
+./vendor/bin/sail test tests/Temp/Ta01BaselineMeasurementTest.php --filter=baseline
+
+結果:
+- HTTP計測出力: 4ケース
+- PHPUnit: 1 risky, 0 assertions
+- failed: 0
+- risky理由: 計測ハーネスがassertionを持たないため
