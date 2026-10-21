@@ -21,7 +21,6 @@ use App\Http\Requests\Meeting\UpsertMemoRequest;
 use App\Models\Certification;
 use App\Models\Enrollment;
 use App\Models\Meeting;
-use App\Models\MeetingMemo;
 use App\Models\MeetingQuotaTransaction;
 use App\Models\User;
 use App\Notifications\MeetingCanceledNotification;
@@ -34,6 +33,7 @@ use App\UseCases\Meeting\FetchAvailabilityAction;
 use App\UseCases\Meeting\ListCoachMeetingsAction;
 use App\UseCases\Meeting\ListStudentMeetingsAction;
 use App\UseCases\Meeting\ShowAction;
+use App\UseCases\Meeting\UpsertMemoAction;
 use App\UseCases\MeetingQuota\ConsumeQuotaAction;
 use App\UseCases\MeetingQuota\RefundQuotaAction;
 use Carbon\Carbon;
@@ -328,20 +328,11 @@ class MeetingController extends Controller
     /**
      * 担当コーチによる面談メモ作成・更新。canceled の面談にはメモを残せない。
      */
-    public function upsertMemo(Meeting $meeting, UpsertMemoRequest $request): RedirectResponse
+    public function upsertMemo(Meeting $meeting, UpsertMemoRequest $request, UpsertMemoAction $action): RedirectResponse
     {
         $body = $request->validated('body');
 
-        DB::transaction(function () use ($meeting, $body) {
-            if (! in_array($meeting->status, [MeetingStatus::Reserved, MeetingStatus::Completed], true)) {
-                throw MeetingStatusTransitionException::forMemo();
-            }
-
-            MeetingMemo::updateOrCreate(
-                ['meeting_id' => $meeting->id],
-                ['body' => $body],
-            );
-        });
+        $action($meeting, $body);
 
         return redirect()
             ->route('meetings.show', $meeting)
