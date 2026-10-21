@@ -14,12 +14,15 @@ use App\Models\CoachAvailability;
 use App\Models\Enrollment;
 use App\Models\GoogleCredential;
 use App\Models\Meeting;
+use App\Models\MeetingQuotaTransaction;
 use App\Models\User;
 use App\Notifications\MeetingReservedNotification;
 use App\Services\GoogleCalendarService;
+use App\Services\MeetingQuotaService;
 use App\UseCases\Meeting\ReserveAction;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Str;
 use Mockery;
@@ -88,6 +91,36 @@ final class ReserveActionTest extends TestCase
         } finally {
             $this->assertDatabaseCount('meetings', 0);
             $this->assertDatabaseCount('meeting_quota_transactions', 0);
+        }
+    }
+
+    public function test_rolls_back_meeting_when_quota_consumption_fails(): void
+    {
+        Notification::fake();
+        [$student, , $enrollment, $scheduledAt] = $this->reservationFixture();
+        $before = app(MeetingQuotaService::class)->remaining($student);
+        $google = Mockery::mock(GoogleCalendarService::class);
+        $google->shouldNotReceive('freeBusy');
+        $google->shouldNotReceive('createEvent');
+        $this->app->instance(GoogleCalendarService::class, $google);
+
+        $event = 'eloquent.creating: '.MeetingQuotaTransaction::class;
+        Event::listen($event, static function (): void {
+            throw new \RuntimeException('quota consumption failure');
+        });
+
+        try {
+            app(ReserveAction::class)($enrollment, $scheduledAt, 'Quota失敗');
+            $this->fail('Expected quota consumption failure was not thrown.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('quota consumption failure', $exception->getMessage());
+        } finally {
+            Event::forget($event);
+
+            $this->assertDatabaseCount('meetings', 0);
+            $this->assertDatabaseCount('meeting_quota_transactions', 0);
+            $this->assertSame($before, app(MeetingQuotaService::class)->remaining($student));
+            Notification::assertNothingSent();
         }
     }
 
