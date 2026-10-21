@@ -14,6 +14,7 @@ use App\Models\Certification;
 use App\Models\Enrollment;
 use App\Models\EnrollmentStatusLog;
 use App\Models\User;
+use App\Services\CertificatePdfService;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Str;
 
@@ -82,34 +83,42 @@ final class CertificateSeeder extends Seeder
         $passedAt = $planExpiresAt->copy()->subDays(7);
         $startedAt = $planExpiresAt->copy()->subDays(90);
 
-        $enrollment = Enrollment::factory()
-            ->for($student)
-            ->for($certification)
-            ->state([
+        $enrollment = Enrollment::firstOrCreate(
+            [
+                'user_id' => $student->id,
+                'certification_id' => $certification->id,
+            ],
+            [
                 'status' => EnrollmentStatus::Passed->value,
                 'current_term' => TermType::MockPractice->value,
                 'exam_date' => $examDate,
                 'passed_at' => $passedAt,
-            ])
-            ->create();
+            ],
+        );
 
-        $enrollment->forceFill(['created_at' => $startedAt, 'updated_at' => $passedAt])->save();
+        if ($enrollment->wasRecentlyCreated) {
+            $enrollment->forceFill(['created_at' => $startedAt, 'updated_at' => $passedAt])->save();
+        }
 
-        EnrollmentStatusLog::factory()->for($enrollment)->create([
-            'from_status' => null,
-            'to_status' => EnrollmentStatus::Learning->value,
-            'changed_by_user_id' => $student->id,
-            'changed_at' => $startedAt,
-            'changed_reason' => '新規登録',
-        ]);
+        EnrollmentStatusLog::firstOrCreate(
+            ['enrollment_id' => $enrollment->id, 'to_status' => EnrollmentStatus::Learning->value],
+            [
+                'from_status' => null,
+                'changed_by_user_id' => $student->id,
+                'changed_at' => $startedAt,
+                'changed_reason' => '新規登録',
+            ],
+        );
 
-        EnrollmentStatusLog::factory()->for($enrollment)->create([
-            'from_status' => EnrollmentStatus::Learning->value,
-            'to_status' => EnrollmentStatus::Passed->value,
-            'changed_by_user_id' => $student->id,
-            'changed_at' => $passedAt,
-            'changed_reason' => '受講生による修了証受領',
-        ]);
+        EnrollmentStatusLog::firstOrCreate(
+            ['enrollment_id' => $enrollment->id, 'to_status' => EnrollmentStatus::Passed->value],
+            [
+                'from_status' => EnrollmentStatus::Learning->value,
+                'changed_by_user_id' => $student->id,
+                'changed_at' => $passedAt,
+                'changed_reason' => '受講生による修了証受領',
+            ],
+        );
 
         return $enrollment;
     }
@@ -121,12 +130,19 @@ final class CertificateSeeder extends Seeder
     {
         $issuedAt = $enrollment->passed_at ?? now();
 
-        $certificate = Certificate::factory()
-            ->forEnrollment($enrollment)
-            ->state([
-                'pdf_path' => 'certificates/'.Str::ulid().'.pdf',
-                'issued_at' => $issuedAt,
-            ])
-            ->create();
+        $certificate = Certificate::query()->firstOrCreate(
+            ['enrollment_id' => $enrollment->id],
+            Certificate::factory()
+                ->forEnrollment($enrollment)
+                ->state([
+                    'pdf_path' => 'certificates/'.Str::ulid().'.pdf',
+                    'issued_at' => $issuedAt,
+                ])
+                ->make()->getAttributes(),
+        );
+
+        if ($certificate->wasRecentlyCreated) {
+            app(CertificatePdfService::class)->generateAndStore($certificate);
+        }
     }
 }

@@ -31,6 +31,7 @@ final class EnrollmentNoteSeeder extends Seeder
             ->whereHas('user', fn ($query) => $query->whereNull('deleted_at'))
             ->whereHas('certification.coaches')
             ->orderBy('created_at')
+            ->orderBy('id')
             ->get();
 
         $multi = $enrollments->first(
@@ -49,7 +50,11 @@ final class EnrollmentNoteSeeder extends Seeder
         $certificationIds = [$multi->certification_id];
         $offset = 4;
 
-        foreach ($enrollments as $enrollment) {
+        [$newStudentEnrollments, $remainingEnrollments] = $enrollments
+            ->reject(fn (Enrollment $enrollment): bool => $enrollment->is($multi))
+            ->partition(fn (Enrollment $enrollment): bool => ! in_array($enrollment->user_id, $studentIds, true));
+
+        foreach ($newStudentEnrollments->concat($remainingEnrollments) as $enrollment) {
             if ($enrollment->is($multi)) {
                 continue;
             }
