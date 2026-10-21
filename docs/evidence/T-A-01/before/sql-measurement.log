@@ -1,0 +1,18 @@
+T-A-01 改修前SQL計測ログ
+計測日時: 2026-10-20T23:14:08+0900
+ブランチ: feature/T-A-01
+HEAD: 47248fe
+コマンド: ./vendor/bin/sail test tests/Temp/Ta01BaselineMeasurementTest.php --filter=baseline
+
+実行結果:
+Tests: 1 risky (0 assertions)
+理由: 計測ハーネスは出力確認のみで、PHPUnit assertionを実行しないため。
+
+admin_5: status=200 total_queries=15 certification_queries=6 updated_by_queries=5 other_queries=4 page_items=5 question_count_attribute_present=false response_time_ms=88.9
+admin_20: status=200 total_queries=45 certification_queries=21 updated_by_queries=20 other_queries=4 page_items=20 question_count_attribute_present=false response_time_ms=61.03
+admin_21_page_2: status=200 total_queries=7 certification_queries=2 updated_by_queries=1 other_queries=4 page_items=1 question_count_attribute_present=false response_time_ms=24.4
+coach_assigned_page_2: status=200 total_queries=45 certification_queries=21 updated_by_queries=20 other_queries=4 page_items=20 question_count_attribute_present=false response_time_ms=65.11
+
+注記:
+- SQL全文・バインド値は既存ハーネスが出力しないため、このログには含めていない。
+- 認証情報・個人情報は含めていない。

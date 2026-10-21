@@ -1,0 +1,15 @@
+T-A-01 改修前計測ハーネス実行結果
+計測日時: 2026-10-20T23:14:08+0900
+ブランチ: feature/T-A-01
+HEAD: 47248fe
+コマンド: ./vendor/bin/sail test tests/Temp/Ta01BaselineMeasurementTest.php --filter=baseline
+
+結果:
+- HTTP計測出力: 4ケース
+- PHPUnit: 1 risky, 0 assertions
+- テスト失敗: なし
+- risky理由: 計測ハーネスがassertionを持たないため
+
+既存の模試関連テスト結果は前回計測時に以下を確認済み:
+- MockExam関連Feature: 19 passed, 1 failed
+- 失敗: 既存のMockExamIndexQueryCountTest（現行N+1を検出）
