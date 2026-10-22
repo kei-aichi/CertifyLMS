@@ -8,7 +8,7 @@ use App\Enums\UserStatus;
 use App\Models\QaReply;
 use App\Models\QaThread;
 use App\Models\User;
-use App\Notifications\QaReplyReceivedNotification;
+use App\Jobs\QaReply\DispatchQaReplyNotifications;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 
@@ -28,16 +28,7 @@ final class StoreAction
             $reply = $thread->replies()->create(['user_id' => $user->id, 'body' => $validated['body']]);
 
             DB::afterCommit(function () use ($reply): void {
-                $reply->loadMissing(['qaThread.user', 'user']);
-                $questionAuthor = $reply->qaThread?->user;
-
-                if ($questionAuthor === null
-                    || $questionAuthor->id === $reply->user_id
-                    || $questionAuthor->status !== UserStatus::InProgress) {
-                    return;
-                }
-
-                $questionAuthor->notify(new QaReplyReceivedNotification($reply));
+                DispatchQaReplyNotifications::dispatch($reply->id);
             });
 
             return $reply;
