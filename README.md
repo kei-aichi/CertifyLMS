@@ -686,6 +686,24 @@ sail artisan test                  # 全テスト実行
 sail artisan test --filter=Xxx    # クラス名・メソッド名で絞り込み
 ```
 
+## Queue worker（Database Queue）
+
+通知・メールの非同期処理を実行するには、Database Queue workerを起動します。
+別のターミナルで次を実行してください。
+
+```bash
+sail artisan queue:work database --queue=default --timeout=120
+```
+
+`retry_after`は180秒、workerの`--timeout`は120秒です。workerを起動していない場合、投入されたJobは`jobs`テーブルに残り、通知は処理されません。
+
+停止は`Ctrl+C`で行います。失敗Jobの確認と再投入は次のコマンドで行います。
+
+```bash
+sail artisan queue:failed
+sail artisan queue:retry all
+```
+
 ## コード整形
 
 Laravel Pint を使用しています。コミット前に実行してください。
