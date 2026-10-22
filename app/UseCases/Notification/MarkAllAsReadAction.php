@@ -8,8 +8,8 @@ use App\Models\User;
 
 final class MarkAllAsReadAction
 {
-    public function __invoke(User $user): void
+    public function __invoke(User $user): int
     {
-        $user->unreadNotifications()->whereNull('read_at')->update(['read_at' => now()]);
+        return $user->unreadNotifications()->whereNull('read_at')->update(['read_at' => now()]);
     }
 }
