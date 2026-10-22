@@ -4,16 +4,12 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Http;
 
-use App\Exceptions\MeetingQuota\CheckoutFulfillmentException;
-use App\Models\MeetingPack;
-use App\Models\MeetingQuotaTransaction;
 use App\Models\Payment;
-use App\Models\User;
 use App\Services\Stripe\StripeCheckoutClient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Testing\TestResponse;
 use Mockery;
 use Stripe\Checkout\Session;
-use Stripe\Webhook;
 use Tests\TestCase;
 
 class StripeWebhookTest extends TestCase
@@ -105,10 +101,34 @@ class StripeWebhookTest extends TestCase
         $this->assertDatabaseCount('meeting_quota_transactions', 1);
     }
 
+    public function test_different_event_ids_for_same_payment_are_idempotent(): void
+    {
+        $payment = Payment::factory()->create(['amount' => 500, 'quantity' => 3]);
+        $session = $this->sessionPayload($payment, 'cs_same_payment', 'pi_same_payment');
+        $this->mockStripe($session, 2);
+
+        $first = $this->eventPayload('checkout.session.completed', $session);
+        $first['id'] = 'evt_001';
+        $second = $this->eventPayload('checkout.session.completed', $session);
+        $second['id'] = 'evt_002';
+
+        $this->signedPost($first)->assertOk();
+        $this->signedPost($second)->assertOk();
+
+        $this->assertDatabaseHas('payments', [
+            'id' => $payment->id,
+            'status' => 'succeeded',
+            'stripe_checkout_session_id' => 'cs_same_payment',
+            'stripe_payment_intent_id' => 'pi_same_payment',
+        ]);
+        $this->assertDatabaseCount('meeting_quota_transactions', 1);
+    }
+
     /** @param array<string,mixed> $session */
-    private function signedPost(array $event): \Illuminate\Testing\TestResponse
+    private function signedPost(array $event): TestResponse
     {
         $payload = json_encode($event, JSON_THROW_ON_ERROR);
+
         return $this->call('POST', '/webhooks/stripe', [], [], [], [
             'CONTENT_TYPE' => 'application/json',
             'HTTP_STRIPE_SIGNATURE' => $this->signature($payload),
@@ -118,6 +138,7 @@ class StripeWebhookTest extends TestCase
     private function signature(string $payload): string
     {
         $timestamp = time();
+
         return 't='.$timestamp.',v1='.hash_hmac('sha256', $timestamp.'.'.$payload, self::SECRET);
     }
 
