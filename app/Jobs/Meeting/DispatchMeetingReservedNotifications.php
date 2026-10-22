@@ -1,0 +1,5 @@
+<?php
+declare(strict_types=1);
+namespace App\Jobs\Meeting;
+use App\Enums\UserStatus; use App\Models\User; use App\Support\Notifications\MeetingReservationSnapshot; use Illuminate\Bus\Queueable; use Illuminate\Contracts\Queue\ShouldQueue; use Illuminate\Foundation\Bus\Dispatchable; use Illuminate\Queue\Middleware\WithoutOverlapping; use Illuminate\Queue\SerializesModels;
+final class DispatchMeetingReservedNotifications implements ShouldQueue {use Dispatchable,Queueable,SerializesModels;public function __construct(public readonly array $snapshot){}public function middleware():array{return[(new WithoutOverlapping('meeting-reserved-dispatch:'.$this->snapshot['meeting_id']))->releaseAfter(10)->expireAfter(300)];}public function handle():void{$coach=User::find($this->snapshot['coach_id']);if(!$coach||$coach->status!==UserStatus::InProgress)return;MeetingReservedDatabaseNotificationJob::dispatch($this->snapshot,$coach->id);MeetingReservedMailNotificationJob::dispatch($this->snapshot,$coach->id);}}

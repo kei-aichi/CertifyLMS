@@ -1,0 +1,5 @@
+<?php
+declare(strict_types=1);
+namespace Tests\Unit\Jobs\Meeting;
+use App\Jobs\Meeting\MeetingReservedDatabaseNotificationJob; use App\Support\Notifications\MeetingReservationSnapshot; use App\Models\Meeting; use App\Models\User; use Tests\TestCase;
+final class MeetingReservedNotificationJobsTest extends TestCase {public function test_uuid_is_deterministic_and_snapshot_relations_are_preserved():void{$s=['meeting_id'=>'meeting-1','scheduled_at'=>'2026-01-01T10:00:00+00:00','coach_id'=>'coach-1','coach_name'=>'予約時コーチ','student_id'=>'student-1','student_name'=>'予約時受講生'];$m=MeetingReservationSnapshot::toMeeting($s);$this->assertSame('予約時コーチ',$m->coach->name);$this->assertSame('予約時受講生',$m->student->name);$a=MeetingReservedDatabaseNotificationJob::notificationId('meeting-1','coach-1');$this->assertSame($a,MeetingReservedDatabaseNotificationJob::notificationId('meeting-1','coach-1'));$this->assertNotSame($a,MeetingReservedDatabaseNotificationJob::notificationId('meeting-2','coach-1'));$m->loadMissing(['coach','student']);$this->assertSame('予約時コーチ',$m->coach->name);}}
