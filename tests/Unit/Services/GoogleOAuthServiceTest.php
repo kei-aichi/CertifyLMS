@@ -6,6 +6,7 @@ namespace Tests\Unit\Services;
 
 use App\Models\GoogleCredential;
 use App\Models\User;
+use App\Services\GoogleClientFactory;
 use App\Services\GoogleOAuthService;
 use Google\Client;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -47,5 +48,51 @@ class GoogleOAuthServiceTest extends TestCase
         $service->shouldAllowMockingProtectedMethods()->shouldNotReceive('client');
 
         $this->assertSame($credential->access_token, $service->accessToken($credential));
+    }
+
+    public function test_factory_preserves_oauth_client_configuration(): void
+    {
+        config([
+            'services.google_calendar.client_id' => 'client-id',
+            'services.google_calendar.client_secret' => 'client-secret',
+            'services.google_calendar.redirect_uri' => 'https://example.test/callback',
+        ]);
+
+        $client = app(GoogleClientFactory::class)->createOAuthClient();
+
+        $this->assertSame('client-id', $client->getClientId());
+        $this->assertSame('client-secret', $client->getClientSecret());
+        $this->assertSame('https://example.test/callback', $client->getRedirectUri());
+        $this->assertSame([
+            'https://www.googleapis.com/auth/calendar.freebusy',
+            'https://www.googleapis.com/auth/calendar.events.owned',
+        ], $client->getScopes());
+    }
+
+    public function test_factory_can_be_explicitly_injected(): void
+    {
+        $client = Mockery::mock(Client::class);
+        $client->shouldReceive('setState')->once()->with('state');
+        $client->shouldReceive('createAuthUrl')->once()->andReturn('https://example.test/oauth');
+        $factory = Mockery::mock(GoogleClientFactory::class);
+        $factory->shouldReceive('createOAuthClient')->once()->andReturn($client);
+
+        $service = new GoogleOAuthService($factory);
+
+        $this->assertSame('https://example.test/oauth', $service->authorizationUrl('state'));
+    }
+
+    public function test_factory_can_be_replaced_by_container_binding(): void
+    {
+        $client = Mockery::mock(Client::class);
+        $client->shouldReceive('setState')->once()->with('state');
+        $client->shouldReceive('createAuthUrl')->once()->andReturn('https://example.test/oauth');
+        $factory = Mockery::mock(GoogleClientFactory::class);
+        $factory->shouldReceive('createOAuthClient')->once()->andReturn($client);
+        $this->app->instance(GoogleClientFactory::class, $factory);
+
+        $service = new GoogleOAuthService;
+
+        $this->assertSame('https://example.test/oauth', $service->authorizationUrl('state'));
     }
 }

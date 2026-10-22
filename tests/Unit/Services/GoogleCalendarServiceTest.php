@@ -8,6 +8,7 @@ use App\Models\GoogleCredential;
 use App\Models\Meeting;
 use App\Models\User;
 use App\Services\GoogleCalendarService;
+use App\Services\GoogleClientFactory;
 use App\Services\GoogleOAuthService;
 use Google\Service\Calendar;
 use Google\Service\Calendar\Event;
@@ -142,6 +143,13 @@ class GoogleCalendarServiceTest extends TestCase
         $service->shouldAllowMockingProtectedMethods()->shouldNotReceive('calendarClient');
 
         $this->assertFalse($service->deleteEvent($credential, 'old-connection', 'event-123'));
+    }
+
+    public function test_factory_preserves_calendar_access_token_configuration(): void
+    {
+        $client = app(GoogleClientFactory::class)->createCalendarClient('access-token');
+
+        $this->assertSame(['access_token' => 'access-token'], $client->getAccessToken());
     }
 
     /** @return array{GoogleCalendarService, GoogleCredential} */
