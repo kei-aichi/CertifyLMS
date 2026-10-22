@@ -1,0 +1,5 @@
+<?php
+declare(strict_types=1);
+namespace App\Jobs\Meeting;
+use App\Enums\UserStatus; use App\Models\User; use Illuminate\Bus\Queueable; use Illuminate\Contracts\Queue\ShouldQueue; use Illuminate\Foundation\Bus\Dispatchable; use Illuminate\Queue\Middleware\WithoutOverlapping; use Illuminate\Queue\SerializesModels;
+final class DispatchMeetingCanceledNotifications implements ShouldQueue {use Dispatchable,Queueable,SerializesModels;public function __construct(public readonly array $snapshot){}public function middleware():array{return[(new WithoutOverlapping('meeting-canceled-dispatch:'.$this->snapshot['meeting_id']))->releaseAfter(10)->expireAfter(300)];}public function handle():void{$recipientId=$this->snapshot['canceled_by_user_id']===$this->snapshot['student_id']?$this->snapshot['coach_id']:($this->snapshot['canceled_by_user_id']===$this->snapshot['coach_id']?$this->snapshot['student_id']:null);if($recipientId===null)return;$u=User::find($recipientId);if(!$u||$u->status!==UserStatus::InProgress)return;MeetingCanceledDatabaseNotificationJob::dispatch($this->snapshot,$recipientId);MeetingCanceledMailNotificationJob::dispatch($this->snapshot,$recipientId);}}
