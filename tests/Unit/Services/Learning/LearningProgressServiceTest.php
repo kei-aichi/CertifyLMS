@@ -16,6 +16,7 @@ use App\Models\User;
 use App\Services\Learning\LearningProgressService;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 class LearningProgressServiceTest extends TestCase
@@ -131,6 +132,23 @@ class LearningProgressServiceTest extends TestCase
         $result = app(LearningProgressService::class)->chapterSectionProgress($part, null);
 
         $this->assertSame(['total' => 2, 'done' => 0], $result[(string) $chapter->id]);
+    }
+
+    public function test_chapter_section_progress_does_not_query_progresses_without_enrollment(): void
+    {
+        [, $part, $chapter] = $this->scenario();
+        Section::factory()->for($chapter)->published()->create();
+        $queries = [];
+
+        DB::listen(function ($query) use (&$queries): void {
+            $queries[] = $query->sql;
+        });
+
+        app(LearningProgressService::class)->chapterSectionProgress($part, null);
+
+        $this->assertFalse(
+            collect($queries)->contains(fn (string $sql): bool => str_contains($sql, 'section_progresses')),
+        );
     }
 
     /** @return array{0: Enrollment, 1: Part, 2: Chapter} */

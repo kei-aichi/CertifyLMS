@@ -52,7 +52,9 @@ final class ShowPartAction
             $chapterId = (string) $chapter->id;
             $progress = $chapterProgress[$chapterId] ?? ['total' => 0, 'done' => 0];
             $chapter->setAttribute('sections_total_count', $progress['total']);
-            $completedByChapter[$chapterId] = $progress['done'];
+            if ($enrollment !== null) {
+                $completedByChapter[$chapterId] = $progress['done'];
+            }
         }
 
         return [
