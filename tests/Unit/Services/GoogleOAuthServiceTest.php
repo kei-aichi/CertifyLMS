@@ -95,4 +95,57 @@ class GoogleOAuthServiceTest extends TestCase
 
         $this->assertSame('https://example.test/oauth', $service->authorizationUrl('state'));
     }
+
+    public function test_authorization_url_sets_the_supplied_state(): void
+    {
+        $client = Mockery::mock(Client::class);
+        $client->shouldReceive('setState')->once()->with('oauth-state');
+        $client->shouldReceive('createAuthUrl')->once()->andReturn('https://example.test/oauth');
+        $factory = Mockery::mock(GoogleClientFactory::class);
+        $factory->shouldReceive('createOAuthClient')->once()->andReturn($client);
+
+        $this->assertSame('https://example.test/oauth', (new GoogleOAuthService($factory))->authorizationUrl('oauth-state'));
+    }
+
+    public function test_exchange_code_returns_a_valid_token(): void
+    {
+        $client = Mockery::mock(Client::class);
+        $client->shouldReceive('fetchAccessTokenWithAuthCode')->once()->with('code')->andReturn([
+            'access_token' => 'access-token',
+            'expires_in' => 3600,
+        ]);
+        $factory = Mockery::mock(GoogleClientFactory::class);
+        $factory->shouldReceive('createOAuthClient')->once()->andReturn($client);
+
+        $this->assertSame(['access_token' => 'access-token', 'expires_in' => 3600], (new GoogleOAuthService($factory))->exchangeCode('code'));
+    }
+
+    public function test_exchange_code_rejects_google_error_response(): void
+    {
+        $client = Mockery::mock(Client::class);
+        $client->shouldReceive('fetchAccessTokenWithAuthCode')->once()->andReturn(['error' => 'invalid_grant']);
+        $factory = Mockery::mock(GoogleClientFactory::class);
+        $factory->shouldReceive('createOAuthClient')->once()->andReturn($client);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Google OAuth token exchange failed.');
+        (new GoogleOAuthService($factory))->exchangeCode('code');
+    }
+
+    public function test_refresh_rejects_missing_refresh_token(): void
+    {
+        $credential = GoogleCredential::factory()->for(User::factory()->coach()->create(), 'coach')->create([
+            'access_token' => 'expired',
+            'refresh_token' => '',
+            'expires_at' => now()->subMinute(),
+        ]);
+        $client = Mockery::mock(Client::class);
+        $client->shouldReceive('fetchAccessTokenWithRefreshToken')->once()->with('')->andReturn(['error' => 'invalid_request']);
+        $service = Mockery::mock(GoogleOAuthService::class)->makePartial();
+        $service->shouldAllowMockingProtectedMethods()->shouldReceive('client')->once()->andReturn($client);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Google OAuth token refresh failed.');
+        $service->accessToken($credential);
+    }
 }

@@ -108,6 +108,21 @@ class GoogleCalendarServiceTest extends TestCase
         $service->freeBusy($credential, now(), now()->addHour());
     }
 
+    /** @dataProvider googleApiErrorStatuses */
+    public function test_free_busy_converts_google_api_error_statuses_to_safe_exception(int $status): void
+    {
+        [$service, $credential] = $this->freeBusyServiceWithCalendar([], apiException: new GoogleServiceException('upstream', $status));
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Google Calendar FreeBusy request failed.');
+        $service->freeBusy($credential, now(), now()->addHour());
+    }
+
+    public static function googleApiErrorStatuses(): array
+    {
+        return [[401], [403], [429], [500]];
+    }
+
     public function test_create_event_uses_fixed_title_url_and_times(): void
     {
         $credential = GoogleCredential::factory()->for(User::factory()->coach()->create(), 'coach')->create();
@@ -133,6 +148,39 @@ class GoogleCalendarServiceTest extends TestCase
         $service->shouldAllowMockingProtectedMethods()->shouldReceive('calendarClient')->once()->andReturn($calendar);
 
         $this->assertSame('event-123', $service->createEvent($credential, $meeting));
+    }
+
+    public function test_create_event_rejects_response_without_event_id(): void
+    {
+        $credential = GoogleCredential::factory()->for(User::factory()->coach()->create(), 'coach')->create();
+        $meeting = Meeting::factory()->forCoach($credential->coach)->create();
+        $created = Mockery::mock();
+        $created->shouldReceive('getId')->once()->andReturn(null);
+        $events = Mockery::mock();
+        $events->shouldReceive('insert')->once()->andReturn($created);
+        $calendar = Mockery::mock(Calendar::class);
+        $calendar->events = $events;
+        $service = Mockery::mock(GoogleCalendarService::class, [Mockery::mock(GoogleOAuthService::class)])->makePartial();
+        $service->shouldAllowMockingProtectedMethods()->shouldReceive('calendarClient')->once()->andReturn($calendar);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Google Calendar event ID was not returned.');
+        $service->createEvent($credential, $meeting);
+    }
+
+    public function test_delete_event_converts_non_404_google_error(): void
+    {
+        $credential = GoogleCredential::factory()->for(User::factory()->coach()->create(), 'coach')->create();
+        $events = Mockery::mock();
+        $events->shouldReceive('delete')->once()->andThrow(new GoogleServiceException('forbidden', 403));
+        $calendar = Mockery::mock(Calendar::class);
+        $calendar->events = $events;
+        $service = Mockery::mock(GoogleCalendarService::class, [Mockery::mock(GoogleOAuthService::class)])->makePartial();
+        $service->shouldAllowMockingProtectedMethods()->shouldReceive('calendarClient')->once()->andReturn($calendar);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Google Calendar event deletion failed.');
+        $service->deleteEvent($credential, $credential->getKey(), 'event-123');
     }
 
     public function test_delete_event_skips_old_connection_and_treats_missing_event_as_success(): void
