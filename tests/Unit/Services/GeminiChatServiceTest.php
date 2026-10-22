@@ -8,6 +8,7 @@ use App\DTOs\AiChat\AiChatPrompt;
 use App\Exceptions\AiChat\GeminiApiException;
 use App\Exceptions\AiChat\GeminiApiKeyMissingException;
 use App\Services\GeminiChatService;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -120,5 +121,48 @@ class GeminiChatServiceTest extends TestCase
         app(GeminiChatService::class)->generate(new AiChatPrompt('system', []));
         Http::assertSent(fn ($request) => $request->url() === 'https://generativelanguage.googleapis.com/v1beta/models/gemini-test:generateContent'
             && $request->hasHeader('x-goog-api-key', 'key'));
+    }
+
+    public function test_connection_exception_is_not_retried(): void
+    {
+        config(['ai-chat.gemini.api_key' => 'key', 'ai-chat.gemini.max_retries' => 2]);
+        $requests = 0;
+        Http::fake(static function () use (&$requests): never {
+            $requests++;
+            throw new ConnectionException('connection failed');
+        });
+
+        $this->expectException(GeminiApiException::class);
+        $this->expectExceptionMessage('Gemini connection failed.');
+        try {
+            app(GeminiChatService::class)->generate(new AiChatPrompt('system', []));
+        } finally {
+            $this->assertSame(1, $requests);
+        }
+    }
+
+    public function test_request_contains_complete_prompt_payload(): void
+    {
+        config(['ai-chat.gemini.api_key' => 'key']);
+        Http::fake(['generativelanguage.googleapis.com/*' => Http::response([
+            'candidates' => [['content' => ['parts' => [['text' => 'ok']]]]],
+        ])]);
+        $prompt = new AiChatPrompt('system instruction', [
+            ['role' => 'model', 'parts' => [['text' => 'previous answer']]],
+            ['role' => 'user', 'parts' => [['text' => 'current question']]],
+        ]);
+
+        app(GeminiChatService::class)->generate($prompt);
+
+        Http::assertSent(function ($request) use ($prompt): bool {
+            $payload = $request->data();
+
+            return data_get($payload, 'systemInstruction.parts.0.text') === 'system instruction'
+                && data_get($payload, 'contents.0.role') === 'model'
+                && data_get($payload, 'contents.0.parts.0.text') === 'previous answer'
+                && data_get($payload, 'contents.1.role') === 'user'
+                && data_get($payload, 'contents.1.parts.0.text') === 'current question'
+                && $payload === $prompt->toGeminiPayload();
+        });
     }
 }
