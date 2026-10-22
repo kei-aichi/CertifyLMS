@@ -16,9 +16,11 @@ use App\Services\Stripe\StripeCheckoutClient;
 use App\UseCases\MeetingQuota\FulfillCheckoutAction;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Mockery;
+use PHPUnit\Framework\Attributes\Group;
 use Stripe\Checkout\Session;
 use Tests\TestCase;
 
+#[Group('external-api')]
 class FulfillCheckoutActionTest extends TestCase
 {
     use RefreshDatabase;

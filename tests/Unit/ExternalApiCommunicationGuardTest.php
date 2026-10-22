@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Services\GoogleCalendarService;
 use App\Services\GoogleClientFactory;
 use App\Services\GoogleOAuthService;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use PHPUnit\Framework\Attributes\Group;
 use Stripe\ApiRequestor;
@@ -20,6 +21,8 @@ use Tests\TestCase;
 #[Group('external-api-guard')]
 class ExternalApiCommunicationGuardTest extends TestCase
 {
+    use RefreshDatabase;
+
     public function test_unmatched_laravel_http_request_is_rejected(): void
     {
         $this->expectException(\RuntimeException::class);

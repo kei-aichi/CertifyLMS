@@ -11,8 +11,10 @@ use App\Services\GoogleOAuthService;
 use Google\Client;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Mockery;
+use PHPUnit\Framework\Attributes\Group;
 use Tests\TestCase;
 
+#[Group('external-api')]
 class GoogleOAuthServiceTest extends TestCase
 {
     use RefreshDatabase;

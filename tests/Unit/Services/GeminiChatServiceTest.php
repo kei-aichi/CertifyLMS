@@ -10,8 +10,10 @@ use App\Exceptions\AiChat\GeminiApiKeyMissingException;
 use App\Services\GeminiChatService;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
+use PHPUnit\Framework\Attributes\Group;
 use Tests\TestCase;
 
+#[Group('external-api')]
 class GeminiChatServiceTest extends TestCase
 {
     public function test_success_extracts_text_and_metadata(): void

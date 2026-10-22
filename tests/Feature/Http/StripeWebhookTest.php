@@ -9,9 +9,11 @@ use App\Services\Stripe\StripeCheckoutClient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Testing\TestResponse;
 use Mockery;
+use PHPUnit\Framework\Attributes\Group;
 use Stripe\Checkout\Session;
 use Tests\TestCase;
 
+#[Group('external-api')]
 class StripeWebhookTest extends TestCase
 {
     use RefreshDatabase;
