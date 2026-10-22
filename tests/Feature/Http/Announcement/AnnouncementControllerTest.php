@@ -9,15 +9,20 @@ use App\Models\Announcement;
 use App\Models\Certification;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Notifications\Events\NotificationSending;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Mail;
-use RuntimeException;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 final class AnnouncementControllerTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        Queue::fake();
+    }
 
     public function test_unauthenticated_user_cannot_access_announcement_management(): void
     {
@@ -265,28 +270,26 @@ final class AnnouncementControllerTest extends TestCase
 
         $this->assertDatabaseHas('announcements', [
             'submission_key' => 'submission-key-1',
-            'dispatch_status' => 'succeeded',
+            'dispatch_status' => 'processing',
             'dispatched_count' => 1,
         ]);
-        $this->assertDatabaseCount('notifications', 1);
+        $this->assertDatabaseCount('notifications', 0);
 
         $this->actingAs($admin)
             ->post(route('admin.announcements.store'), $payload)
             ->assertRedirect();
 
         $this->assertDatabaseCount('announcements', 1);
-        $this->assertDatabaseCount('notifications', 1);
-        $this->assertDatabaseHas('notifications', ['notifiable_id' => $student->id]);
+        $this->assertDatabaseCount('notifications', 0);
+        $this->assertDatabaseMissing('notifications', ['notifiable_id' => $student->id]);
+        Queue::assertPushed(\App\Jobs\Announcement\DispatchAnnouncementRecipientsJob::class, 1);
     }
 
-    public function test_failed_dispatch_uses_the_issue_message_exactly(): void
+    public function test_store_returns_accepted_message_before_queue_completion(): void
     {
         Mail::fake();
         $admin = User::factory()->admin()->create();
-        User::factory()->student()->create();
-        $this->app['events']->listen(NotificationSending::class, static function (): void {
-            throw new RuntimeException('notification failure');
-        });
+        $student = User::factory()->student()->create();
 
         $this->actingAs($admin)
             ->post(route('admin.announcements.store'), [
@@ -296,6 +299,12 @@ final class AnnouncementControllerTest extends TestCase
                 'submission_key' => 'failed-message-key',
             ])
             ->assertRedirect()
-            ->assertSessionHas('error', '配信処理でエラーが発生しました。一部の受講生に配信済みの可能性があります。配信履歴を確認し、個別に対応してください。');
+            ->assertSessionHas('status', 'お知らせを配信しました。');
+
+        $this->assertDatabaseHas('announcements', [
+            'submission_key' => 'failed-message-key',
+            'dispatch_status' => 'processing',
+        ]);
+        $this->assertDatabaseHas('announcement_recipients', ['recipient_id' => $student->id]);
     }
 }
