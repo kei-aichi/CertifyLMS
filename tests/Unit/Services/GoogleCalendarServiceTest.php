@@ -14,6 +14,11 @@ use Google\Service\Calendar;
 use Google\Service\Calendar\Event;
 use Google\Service\Calendar\EventDateTime;
 use Google\Service\Exception as GoogleServiceException;
+use GuzzleHttp\Client as GuzzleClient;
+use GuzzleHttp\Handler\MockHandler;
+use GuzzleHttp\HandlerStack;
+use GuzzleHttp\Middleware;
+use GuzzleHttp\Psr7\Response;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Mockery;
@@ -185,6 +190,19 @@ class GoogleCalendarServiceTest extends TestCase
         $service->deleteEvent($credential, $credential->getKey(), 'event-123');
     }
 
+    public function test_delete_event_treats_google_404_as_success(): void
+    {
+        $credential = GoogleCredential::factory()->for(User::factory()->coach()->create(), 'coach')->create();
+        $events = Mockery::mock();
+        $events->shouldReceive('delete')->once()->andThrow(new GoogleServiceException('not found', 404));
+        $calendar = Mockery::mock(Calendar::class);
+        $calendar->events = $events;
+        $service = Mockery::mock(GoogleCalendarService::class, [Mockery::mock(GoogleOAuthService::class)])->makePartial();
+        $service->shouldAllowMockingProtectedMethods()->shouldReceive('calendarClient')->once()->andReturn($calendar);
+
+        $this->assertTrue($service->deleteEvent($credential, $credential->getKey(), 'event-123'));
+    }
+
     public function test_delete_event_skips_old_connection_and_treats_missing_event_as_success(): void
     {
         $credential = GoogleCredential::factory()->for(User::factory()->coach()->create(), 'coach')->create();
@@ -200,6 +218,54 @@ class GoogleCalendarServiceTest extends TestCase
         $client = app(GoogleClientFactory::class)->createCalendarClient('access-token');
 
         $this->assertSame(['access_token' => 'access-token'], $client->getAccessToken());
+    }
+
+    public function test_calendar_operation_continues_after_expired_token_refresh(): void
+    {
+        $credential = GoogleCredential::factory()->for(User::factory()->coach()->create(), 'coach')->create([
+            'access_token' => 'expired-access-token',
+            'refresh_token' => 'refresh-token',
+            'expires_at' => now()->subMinute(),
+        ]);
+        $history = [];
+        $mockHandler = new MockHandler([
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'access_token' => 'refreshed-access-token',
+                'expires_in' => 3600,
+            ], JSON_THROW_ON_ERROR)),
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'calendars' => [
+                    $credential->calendar_id => ['busy' => []],
+                ],
+            ], JSON_THROW_ON_ERROR)),
+        ]);
+        $handler = HandlerStack::create($mockHandler);
+        $handler->unshift(Middleware::history($history));
+        $httpClient = new GuzzleClient(['handler' => $handler]);
+        $factory = new GoogleClientFactory($httpClient);
+        $oauth = new GoogleOAuthService($factory);
+        $service = new GoogleCalendarService($oauth, $factory);
+
+        $busy = $service->freeBusy(
+            $credential,
+            Carbon::parse('2026-10-17 09:00:00'),
+            Carbon::parse('2026-10-17 12:00:00'),
+        );
+
+        $this->assertSame([], $busy);
+        $credential->refresh();
+        $this->assertSame('refreshed-access-token', $credential->access_token);
+        $this->assertSame('refresh-token', $credential->refresh_token);
+        $this->assertTrue($credential->expires_at->isFuture());
+        $this->assertCount(2, $history);
+        $this->assertStringContainsString('/token', (string) $history[0]['request']->getUri());
+        $this->assertStringContainsString('/freeBusy', (string) $history[1]['request']->getUri());
+        $calendarRequest = $mockHandler->getLastRequest();
+        $this->assertNotNull($calendarRequest);
+        $this->assertSame(
+            'Bearer refreshed-access-token',
+            $calendarRequest->getHeaderLine('Authorization'),
+        );
     }
 
     /** @return array{GoogleCalendarService, GoogleCredential} */
