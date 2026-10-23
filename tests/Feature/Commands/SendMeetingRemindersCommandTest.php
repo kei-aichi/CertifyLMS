@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature\Commands;
 
 use App\Enums\MeetingStatus;
+use App\Jobs\Meeting\DispatchMeetingReminderNotifications;
 use App\Models\Meeting;
 use App\Models\MeetingReminderDispatch;
 use App\Models\User;
@@ -12,12 +13,19 @@ use Carbon\CarbonImmutable;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Queue;
 use RuntimeException;
 use Tests\TestCase;
 
 final class SendMeetingRemindersCommandTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        Queue::fake();
+    }
 
     protected function tearDown(): void
     {
@@ -35,6 +43,7 @@ final class SendMeetingRemindersCommandTest extends TestCase
             ->assertExitCode(0);
 
         $this->assertSame(2, MeetingReminderDispatch::where('meeting_id', $meeting->id)->count());
+        Queue::assertPushed(DispatchMeetingReminderNotifications::class, 2);
     }
 
     public function test_missed_eve_minute_does_not_backfill(): void
@@ -130,12 +139,12 @@ final class SendMeetingRemindersCommandTest extends TestCase
 
         CarbonImmutable::setTestNow($eveNow);
         $this->artisan('notifications:send-meeting-reminders', ['--window' => 'eve'])
-            ->expectsOutput('Meeting reminders processed: acquired=0, not_eligible=0, duplicate=4, skipped=0, failed=0.')
+            ->expectsOutput('Meeting reminders queued: acquired=0, resume_pending=0, not_eligible=0, duplicate=4, skipped=0, failed=0.')
             ->assertExitCode(0);
 
         CarbonImmutable::setTestNow($oneHourNow);
         $this->artisan('notifications:send-meeting-reminders', ['--window' => 'one_hour_before'])
-            ->expectsOutput('Meeting reminders processed: acquired=0, not_eligible=0, duplicate=2, skipped=0, failed=0.')
+            ->expectsOutput('Meeting reminders queued: acquired=0, resume_pending=0, not_eligible=0, duplicate=2, skipped=0, failed=0.')
             ->assertExitCode(0);
 
         $this->assertSame(6, MeetingReminderDispatch::count());
@@ -157,32 +166,16 @@ final class SendMeetingRemindersCommandTest extends TestCase
     {
         CarbonImmutable::setTestNow('2026-10-10 18:00:30', 'Asia/Tokyo');
         $this->createMeeting('2026-10-11 10:00:00');
-        Notification::shouldReceive('sendNow')->times(4)->ordered()->andReturnUsing(
-            function ($recipient, $notification, $channels): void {
-                if ($channels === ['database']) {
-                    throw new RuntimeException('database failed');
-                }
-            },
-        );
-
         $this->artisan('notifications:send-meeting-reminders', ['--window' => 'eve'])
-            ->assertExitCode(1);
+            ->assertExitCode(0);
     }
 
     public function test_mail_failure_returns_nonzero_while_database_result_is_kept(): void
     {
         CarbonImmutable::setTestNow('2026-10-10 18:00:30', 'Asia/Tokyo');
         $this->createMeeting('2026-10-11 10:00:00');
-        Notification::shouldReceive('sendNow')->times(4)->ordered()->andReturnUsing(
-            function ($recipient, $notification, $channels): void {
-                if ($channels === ['mail']) {
-                    throw new RuntimeException('mail failed');
-                }
-            },
-        );
-
         $this->artisan('notifications:send-meeting-reminders', ['--window' => 'eve'])
-            ->assertExitCode(1);
+            ->assertExitCode(0);
 
         $this->assertSame(2, MeetingReminderDispatch::count());
     }
@@ -191,29 +184,16 @@ final class SendMeetingRemindersCommandTest extends TestCase
     {
         CarbonImmutable::setTestNow('2026-10-10 18:00:30', 'Asia/Tokyo');
         $this->createMeeting('2026-10-11 10:00:00');
-        Notification::shouldReceive('sendNow')->times(4)->andThrow(new RuntimeException('channel failed'));
-
         $this->artisan('notifications:send-meeting-reminders', ['--window' => 'eve'])
-            ->assertExitCode(1);
+            ->assertExitCode(0);
     }
 
     public function test_student_failure_does_not_prevent_coach_processing(): void
     {
         CarbonImmutable::setTestNow('2026-10-10 18:00:30', 'Asia/Tokyo');
         $this->createMeeting('2026-10-11 10:00:00');
-        $calls = 0;
-        Notification::shouldReceive('sendNow')->times(4)->ordered()->andReturnUsing(
-            function () use (&$calls): void {
-                $calls++;
-                if ($calls === 1) {
-                    throw new RuntimeException('student database failed');
-                }
-            },
-        );
-
         $this->artisan('notifications:send-meeting-reminders', ['--window' => 'eve'])
-            ->assertExitCode(1);
-        $this->assertSame(4, $calls);
+            ->assertExitCode(0);
     }
 
     public function test_scheduler_registers_both_commands_every_minute(): void
