@@ -1,0 +1,24 @@
+# T-A-06 修正後テスト結果
+
+実施日: 2026-10-23 (Asia/Tokyo)
+ブランチ: feature/T-A-06
+実行方式: Sail経由、各テストを順番に実行（並列実行なし）
+
+| テスト | 結果 | assertions |
+|---|---:|---:|
+| AdminDashboardCacheServiceTest | 12 passed | 27 |
+| AdminDashboardCacheTest | 4 passed | 11 |
+| AdminDashboardCacheTtlTest | 3 passed | 10 |
+| AdminDashboardCacheGenerationRaceTest | 2 passed | 9 |
+| EnrollmentCacheInvalidationTest | 8 passed | 12 |
+| FailExpiredEnrollmentsCommandTest | 5 passed | 18 |
+| ScheduleCommandChunkTest | 9 passed | 41 |
+| FetchAdminDashboardActionTest | 7 passed | 17 |
+| DashboardQueryCountTest | 6 passed | 12 |
+| ReceiveCertificateActionTest | 7 passed | 24 |
+
+合計: 63 passed, 0 failed, 181 assertions
+
+実行コマンドは各テストファイルに対して以下の形式で実行した。
+
+`./vendor/bin/sail artisan test <test-file>`

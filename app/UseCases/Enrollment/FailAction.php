@@ -10,6 +10,7 @@ use App\Exceptions\Enrollment\EnrollmentInvalidTransitionException;
 use App\Models\Enrollment;
 use App\Models\User;
 use App\Services\DefaultEnrollmentService;
+use App\Services\AdminDashboardCacheService;
 use App\Services\EnrollmentStatusChangeService;
 use Illuminate\Support\Facades\DB;
 
@@ -26,6 +27,7 @@ final class FailAction
     public function __construct(
         private readonly EnrollmentStatusChangeService $statusChanger,
         private readonly DefaultEnrollmentService $defaultEnrollmentService,
+        private readonly AdminDashboardCacheService $dashboardCache,
     ) {}
 
     /**
@@ -57,6 +59,8 @@ final class FailAction
                 $enrollment->user,
                 $enrollment,
             );
+
+            DB::afterCommit(fn () => $this->dashboardCache->invalidate());
 
             return $enrollment->refresh();
         });

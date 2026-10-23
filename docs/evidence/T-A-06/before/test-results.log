@@ -1,0 +1,60 @@
+# T-A-06 修正前テスト結果
+
+実施日: 2026-10-23 (Asia/Tokyo)
+ブランチ: feature/T-A-06
+
+## 実行環境
+
+- `./vendor/bin/sail ps`: 成功。Laravel、MySQL、phpMyAdmin、Mailpitが稼働。
+- `phpunit.xml`: `APP_ENV=testing`、`DB_DATABASE=testing`、`CACHE_DRIVER=array`を定義。
+- `bootstrap/cache/config.php`: absent。
+- `artisan tinker --env=testing`で確認した通常設定値は`APP_ENV=testing`だが、DB名・cache storeは`certify_lms`・databaseのまま表示された。PHPUnit実行中の最終設定値はこの確認コマンドだけでは直接確認できないため、設定ファイルの定義とテスト結果を記録する。
+
+## `FetchAdminDashboardActionTest.php`
+
+```text
+PASS Tests\\Feature\\UseCases\\Dashboard\\FetchAdminDashboardActionTest
+Tests: 6 passed (15 assertions)
+Duration: 3.27s
+```
+
+結果: 6 passed、0 failed。
+
+## `DashboardQueryCountTest.php`
+
+```text
+PASS Tests\\Feature\\Http\\Dashboard\\DashboardQueryCountTest
+Tests: 6 passed (12 assertions)
+Duration: 3.52s
+```
+
+結果: 6 passed、0 failed。
+
+## `AdminDashboardCacheTest.php`
+
+```text
+FAIL Tests\\Feature\\UseCases\\Dashboard\\AdminDashboardCacheTest
+Tests: 2 failed, 2 passed (7 assertions)
+Duration: 3.09s
+```
+
+失敗1: `test_admin_kpi_is_served_from_cache_on_second_fetch`
+
+- `tests/Feature/UseCases/Dashboard/AdminDashboardCacheTest.php:48`
+- 期待値: 2
+- 実際値: 5
+- メッセージ: `TTL 内で無効化イベントが無ければ集計はキャッシュから返るはず`
+
+失敗2: `test_completion_rate_is_served_from_cache_on_second_fetch`
+
+- `tests/Feature/UseCases/Dashboard/AdminDashboardCacheTest.php:87`
+- 期待値: `0.0`
+- 実際値: `0.3333`
+- メッセージ: `TTL 内で無効化イベントが無ければ修了率はキャッシュから返るはず`
+
+成功した2件:
+
+- `test_admin_kpi_cache_is_invalidated_on_enrollment_status_change`
+- `test_completion_rate_cache_is_invalidated_on_enrollment_status_change`
+
+現時点の実装に`Cache::remember()`がないため、上記2件はキャッシュ未実装の期待不一致と整合する。ただし、今回の結果は実装コードを変更せずに取得したテスト結果であり、証跡上は「未実装による失敗」と記録する。
