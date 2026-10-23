@@ -113,6 +113,67 @@ final class AnnouncementNotificationJobsTest extends TestCase
         $this->assertNotNull($failedRow->fresh()->database_processing_started_at);
     }
 
+    public function test_missing_database_recipient_retries_three_times_and_is_failed(): void
+    {
+        [$row, $user] = $this->recipient();
+        $user->delete();
+
+        $job = new AnnouncementDatabaseNotificationJob($row->id, 'database-token');
+        for ($attempt = 1; $attempt <= 3; $attempt++) {
+            if ($attempt < 3) {
+                try {
+                    $job->handle();
+                } catch (RuntimeException) {
+                    // The worker retries the thrown exception.
+                }
+            } else {
+                $job->handle();
+            }
+        }
+
+        $this->assertDatabaseHas('announcement_recipients', [
+            'id' => $row->id,
+            'database_status' => 'failed',
+        ]);
+        $this->assertDatabaseHas('notification_delivery_attempts', [
+            'event_key' => 'announcement:'.$row->announcement_id,
+            'recipient_id' => $user->id,
+            'channel' => 'database',
+            'attempts' => 3,
+        ]);
+    }
+
+    public function test_missing_mail_recipient_retries_three_times_and_does_not_change_database_status(): void
+    {
+        [$row, $user] = $this->recipient();
+        $user->delete();
+
+        $job = new AnnouncementMailNotificationJob($row->id, 'mail-token');
+        for ($attempt = 1; $attempt <= 3; $attempt++) {
+            if ($attempt < 3) {
+                try {
+                    $job->handle();
+                } catch (RuntimeException) {
+                    // The worker retries the thrown exception.
+                }
+            } else {
+                $job->handle();
+            }
+        }
+
+        $this->assertDatabaseHas('announcement_recipients', [
+            'id' => $row->id,
+            'mail_status' => 'failed',
+            'database_status' => 'pending',
+        ]);
+        $this->assertDatabaseHas('notification_delivery_attempts', [
+            'event_key' => 'announcement:'.$row->announcement_id,
+            'recipient_id' => $user->id,
+            'channel' => 'mail',
+            'attempts' => 3,
+        ]);
+    }
+
     /** @return array{AnnouncementRecipient, User} */
     private function recipient(): array
     {

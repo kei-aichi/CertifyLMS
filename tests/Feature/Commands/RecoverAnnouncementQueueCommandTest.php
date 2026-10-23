@@ -14,6 +14,7 @@ use App\Models\NotificationDeliveryAttempt;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -21,12 +22,17 @@ final class RecoverAnnouncementQueueCommandTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_recovery_command_is_registered_with_the_issue_79_name(): void
+    {
+        $this->assertArrayHasKey('announcements:recover-stale', Artisan::all());
+    }
+
     public function test_pending_announcement_dispatcher_is_requeued(): void
     {
         Queue::fake();
         [$announcement] = $this->recipient();
 
-        $this->artisan('announcements')->assertExitCode(0);
+        $this->artisan('announcements:recover-stale')->assertExitCode(0);
 
         Queue::assertPushed(DispatchAnnouncementRecipientsJob::class, fn ($job): bool => $job->announcementId === $announcement->id);
         Queue::assertPushed(AggregateAnnouncementStatusJob::class);
@@ -42,7 +48,7 @@ final class RecoverAnnouncementQueueCommandTest extends TestCase
             'database_claimed_at' => now()->subSeconds(300),
         ]);
 
-        $this->artisan('announcements')->assertExitCode(0);
+        $this->artisan('announcements:recover-stale')->assertExitCode(0);
 
         Queue::assertPushed(AnnouncementDatabaseNotificationJob::class, fn ($job): bool =>
             $job->recipientRowId === $recipient->id && $job->dispatchToken === $token
@@ -61,7 +67,7 @@ final class RecoverAnnouncementQueueCommandTest extends TestCase
         ]);
         $this->insertQueuePayload($this->payloadForDatabaseJob($recipient->id, $token));
 
-        $this->artisan('announcements')->assertExitCode(0);
+        $this->artisan('announcements:recover-stale')->assertExitCode(0);
 
         Queue::assertNotPushed(AnnouncementDatabaseNotificationJob::class);
     }
@@ -77,7 +83,7 @@ final class RecoverAnnouncementQueueCommandTest extends TestCase
         ]);
         $this->insertQueuePayload($this->payloadForDatabaseJob((string) Str::ulid(), $token.'-suffix'));
 
-        $this->artisan('announcements')->assertExitCode(0);
+        $this->artisan('announcements:recover-stale')->assertExitCode(0);
 
         Queue::assertPushed(AnnouncementDatabaseNotificationJob::class);
     }
@@ -93,7 +99,7 @@ final class RecoverAnnouncementQueueCommandTest extends TestCase
         ]);
         $this->insertQueuePayload($this->payloadForMailJob($recipient->id, $token));
 
-        $this->artisan('announcements')->assertExitCode(0);
+        $this->artisan('announcements:recover-stale')->assertExitCode(0);
 
         Queue::assertPushed(AnnouncementDatabaseNotificationJob::class);
     }
@@ -108,7 +114,7 @@ final class RecoverAnnouncementQueueCommandTest extends TestCase
         ]);
         $this->insertQueuePayload('{not-json');
 
-        $this->artisan('announcements')->assertExitCode(0);
+        $this->artisan('announcements:recover-stale')->assertExitCode(0);
 
         Queue::assertNotPushed(AnnouncementDatabaseNotificationJob::class);
     }
@@ -128,7 +134,7 @@ final class RecoverAnnouncementQueueCommandTest extends TestCase
             'attempts' => 3,
         ]);
 
-        $this->artisan('announcements')->assertExitCode(0);
+        $this->artisan('announcements:recover-stale')->assertExitCode(0);
 
         Queue::assertNotPushed(AnnouncementDatabaseNotificationJob::class);
     }

@@ -50,11 +50,27 @@ final class AnnouncementDatabaseNotificationJob implements ShouldQueue
         $row = AnnouncementRecipient::query()->find($this->recipientRowId);
         $user = $row?->recipient()->first();
 
-        if ($row === null || $user === null || $row->database_status === 'succeeded') {
+        if ($row === null || $row->database_status === 'succeeded') {
             return;
         }
 
         $row->forceFill(['database_processing_started_at' => now()])->save();
+
+        if ($user === null) {
+            $attempt = app(NotificationAttemptTracker::class)
+                ->increment('announcement:'.$row->announcement_id, $row->recipient_id, 'database');
+            $exception = new RuntimeException('Announcement recipient no longer exists.');
+            if ($attempt >= 3) {
+                $row->forceFill([
+                    'database_status' => 'failed',
+                    'database_completed_at' => now(),
+                    'database_processing_started_at' => null,
+                ])->save();
+                $this->fail($exception);
+                return;
+            }
+            throw $exception;
+        }
 
         $announcement = $this->snapshotAnnouncement($row);
         $notificationId = self::notificationId($row->announcement_id, $row->recipient_id);

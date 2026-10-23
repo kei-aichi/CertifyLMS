@@ -49,11 +49,27 @@ final class AnnouncementMailNotificationJob implements ShouldQueue
         $row = AnnouncementRecipient::query()->find($this->recipientRowId);
         $user = $row?->recipient()->first();
 
-        if ($row === null || $user === null || $row->mail_status === 'succeeded') {
+        if ($row === null || $row->mail_status === 'succeeded') {
             return;
         }
 
         $row->forceFill(['mail_processing_started_at' => now()])->save();
+
+        if ($user === null) {
+            $attempt = app(NotificationAttemptTracker::class)
+                ->increment('announcement:'.$row->announcement_id, $row->recipient_id, 'mail');
+            $exception = new RuntimeException('Announcement recipient no longer exists.');
+            if ($attempt >= 3) {
+                $row->forceFill([
+                    'mail_status' => 'failed',
+                    'mail_completed_at' => now(),
+                    'mail_processing_started_at' => null,
+                ])->save();
+                $this->fail($exception);
+                return;
+            }
+            throw $exception;
+        }
 
         $previousAttempts = (int) NotificationDeliveryAttempt::query()
             ->where('event_key', 'announcement:'.$row->announcement_id)

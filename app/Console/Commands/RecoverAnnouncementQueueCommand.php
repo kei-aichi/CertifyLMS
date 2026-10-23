@@ -16,7 +16,7 @@ use Illuminate\Support\Facades\DB;
 
 final class RecoverAnnouncementQueueCommand extends Command
 {
-    protected $signature = 'announcements';
+    protected $signature = 'announcements:recover-stale';
 
     protected $description = '管理者お知らせの未投入・消失したQueue Jobを安全に復旧する。';
 
