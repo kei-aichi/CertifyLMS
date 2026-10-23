@@ -27,12 +27,13 @@ final class AcquireDispatchAction
         string $meetingId,
         string $window,
         string $recipientId,
+        bool $queueable = false,
     ): AcquireDispatchResult {
         if (! in_array($window, self::WINDOWS, true)) {
             throw new InvalidArgumentException('Invalid meeting reminder window.');
         }
 
-        return DB::transaction(function () use ($meetingId, $window, $recipientId): AcquireDispatchResult {
+        return DB::transaction(function () use ($meetingId, $window, $recipientId, $queueable): AcquireDispatchResult {
             $meeting = Meeting::query()
                 ->whereKey($meetingId)
                 ->lockForUpdate()
@@ -71,11 +72,19 @@ final class AcquireDispatchAction
             }
 
             try {
-                $dispatch = MeetingReminderDispatch::create([
+                $attributes = [
                     'meeting_id' => $meeting->id,
                     'window' => $window,
                     'recipient_id' => $recipient->id,
-                ]);
+                ];
+                if ($queueable) {
+                    $attributes += [
+                        'legacy' => false,
+                        'database_status' => 'pending',
+                        'mail_status' => 'pending',
+                    ];
+                }
+                $dispatch = MeetingReminderDispatch::create($attributes);
             } catch (QueryException $exception) {
                 if ($this->isDispatchUniqueViolation($exception)) {
                     return AcquireDispatchResult::duplicateResult();
