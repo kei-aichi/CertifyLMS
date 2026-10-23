@@ -34,6 +34,7 @@ final class MeetingReminderMailNotificationJob implements ShouldQueue
         public readonly string $dispatchId,
         public readonly string $token,
         public readonly ?string $queueAttemptUuid = null,
+        public readonly int $cycle = 0,
     ) {}
 
     public function backoff(): array
@@ -74,6 +75,7 @@ final class MeetingReminderMailNotificationJob implements ShouldQueue
             'meeting_reminder:'.$dispatch->meeting_id.':'.$dispatch->window,
             $dispatch->recipient_id,
             'mail',
+            $this->cycle,
         );
         if ($attempt > 3) {
             $this->markFailed($dispatch->id);

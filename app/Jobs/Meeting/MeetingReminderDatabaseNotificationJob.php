@@ -34,6 +34,7 @@ final class MeetingReminderDatabaseNotificationJob implements ShouldQueue
         public readonly string $dispatchId,
         public readonly string $token,
         public readonly ?string $queueAttemptUuid = null,
+        public readonly int $cycle = 0,
     ) {}
 
     public function backoff(): array
@@ -78,7 +79,7 @@ final class MeetingReminderDatabaseNotificationJob implements ShouldQueue
         }
         if ($existing !== null) throw new RuntimeException('Existing reminder notification has different payload.');
 
-        $attempt = app(NotificationAttemptTracker::class)->increment('meeting_reminder:'.$dispatch->meeting_id.':'.$dispatch->window, $dispatch->recipient_id, 'database');
+        $attempt = app(NotificationAttemptTracker::class)->increment('meeting_reminder:'.$dispatch->meeting_id.':'.$dispatch->window, $dispatch->recipient_id, 'database', $this->cycle);
         if ($attempt > 3) {
             $this->markFailed($dispatch->id);
             $this->fail(new RuntimeException('notification delivery attempts exceeded'));
