@@ -8,16 +8,24 @@ use App\Models\GoogleCredential;
 use App\Models\Meeting;
 use App\Models\User;
 use App\Services\GoogleCalendarService;
+use App\Services\GoogleClientFactory;
 use App\Services\GoogleOAuthService;
 use Google\Service\Calendar;
 use Google\Service\Calendar\Event;
 use Google\Service\Calendar\EventDateTime;
 use Google\Service\Exception as GoogleServiceException;
+use GuzzleHttp\Client as GuzzleClient;
+use GuzzleHttp\Handler\MockHandler;
+use GuzzleHttp\HandlerStack;
+use GuzzleHttp\Middleware;
+use GuzzleHttp\Psr7\Response;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Mockery;
+use PHPUnit\Framework\Attributes\Group;
 use Tests\TestCase;
 
+#[Group('external-api')]
 class GoogleCalendarServiceTest extends TestCase
 {
     use RefreshDatabase;
@@ -107,6 +115,21 @@ class GoogleCalendarServiceTest extends TestCase
         $service->freeBusy($credential, now(), now()->addHour());
     }
 
+    /** @dataProvider googleApiErrorStatuses */
+    public function test_free_busy_converts_google_api_error_statuses_to_safe_exception(int $status): void
+    {
+        [$service, $credential] = $this->freeBusyServiceWithCalendar([], apiException: new GoogleServiceException('upstream', $status));
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Google Calendar FreeBusy request failed.');
+        $service->freeBusy($credential, now(), now()->addHour());
+    }
+
+    public static function googleApiErrorStatuses(): array
+    {
+        return [[401], [403], [429], [500]];
+    }
+
     public function test_create_event_uses_fixed_title_url_and_times(): void
     {
         $credential = GoogleCredential::factory()->for(User::factory()->coach()->create(), 'coach')->create();
@@ -134,6 +157,52 @@ class GoogleCalendarServiceTest extends TestCase
         $this->assertSame('event-123', $service->createEvent($credential, $meeting));
     }
 
+    public function test_create_event_rejects_response_without_event_id(): void
+    {
+        $credential = GoogleCredential::factory()->for(User::factory()->coach()->create(), 'coach')->create();
+        $meeting = Meeting::factory()->forCoach($credential->coach)->create();
+        $created = Mockery::mock();
+        $created->shouldReceive('getId')->once()->andReturn(null);
+        $events = Mockery::mock();
+        $events->shouldReceive('insert')->once()->andReturn($created);
+        $calendar = Mockery::mock(Calendar::class);
+        $calendar->events = $events;
+        $service = Mockery::mock(GoogleCalendarService::class, [Mockery::mock(GoogleOAuthService::class)])->makePartial();
+        $service->shouldAllowMockingProtectedMethods()->shouldReceive('calendarClient')->once()->andReturn($calendar);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Google Calendar event ID was not returned.');
+        $service->createEvent($credential, $meeting);
+    }
+
+    public function test_delete_event_converts_non_404_google_error(): void
+    {
+        $credential = GoogleCredential::factory()->for(User::factory()->coach()->create(), 'coach')->create();
+        $events = Mockery::mock();
+        $events->shouldReceive('delete')->once()->andThrow(new GoogleServiceException('forbidden', 403));
+        $calendar = Mockery::mock(Calendar::class);
+        $calendar->events = $events;
+        $service = Mockery::mock(GoogleCalendarService::class, [Mockery::mock(GoogleOAuthService::class)])->makePartial();
+        $service->shouldAllowMockingProtectedMethods()->shouldReceive('calendarClient')->once()->andReturn($calendar);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Google Calendar event deletion failed.');
+        $service->deleteEvent($credential, $credential->getKey(), 'event-123');
+    }
+
+    public function test_delete_event_treats_google_404_as_success(): void
+    {
+        $credential = GoogleCredential::factory()->for(User::factory()->coach()->create(), 'coach')->create();
+        $events = Mockery::mock();
+        $events->shouldReceive('delete')->once()->andThrow(new GoogleServiceException('not found', 404));
+        $calendar = Mockery::mock(Calendar::class);
+        $calendar->events = $events;
+        $service = Mockery::mock(GoogleCalendarService::class, [Mockery::mock(GoogleOAuthService::class)])->makePartial();
+        $service->shouldAllowMockingProtectedMethods()->shouldReceive('calendarClient')->once()->andReturn($calendar);
+
+        $this->assertTrue($service->deleteEvent($credential, $credential->getKey(), 'event-123'));
+    }
+
     public function test_delete_event_skips_old_connection_and_treats_missing_event_as_success(): void
     {
         $credential = GoogleCredential::factory()->for(User::factory()->coach()->create(), 'coach')->create();
@@ -142,6 +211,61 @@ class GoogleCalendarServiceTest extends TestCase
         $service->shouldAllowMockingProtectedMethods()->shouldNotReceive('calendarClient');
 
         $this->assertFalse($service->deleteEvent($credential, 'old-connection', 'event-123'));
+    }
+
+    public function test_factory_preserves_calendar_access_token_configuration(): void
+    {
+        $client = app(GoogleClientFactory::class)->createCalendarClient('access-token');
+
+        $this->assertSame(['access_token' => 'access-token'], $client->getAccessToken());
+    }
+
+    public function test_calendar_operation_continues_after_expired_token_refresh(): void
+    {
+        $credential = GoogleCredential::factory()->for(User::factory()->coach()->create(), 'coach')->create([
+            'access_token' => 'expired-access-token',
+            'refresh_token' => 'refresh-token',
+            'expires_at' => now()->subMinute(),
+        ]);
+        $history = [];
+        $mockHandler = new MockHandler([
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'access_token' => 'refreshed-access-token',
+                'expires_in' => 3600,
+            ], JSON_THROW_ON_ERROR)),
+            new Response(200, ['Content-Type' => 'application/json'], json_encode([
+                'calendars' => [
+                    $credential->calendar_id => ['busy' => []],
+                ],
+            ], JSON_THROW_ON_ERROR)),
+        ]);
+        $handler = HandlerStack::create($mockHandler);
+        $handler->unshift(Middleware::history($history));
+        $httpClient = new GuzzleClient(['handler' => $handler]);
+        $factory = new GoogleClientFactory($httpClient);
+        $oauth = new GoogleOAuthService($factory);
+        $service = new GoogleCalendarService($oauth, $factory);
+
+        $busy = $service->freeBusy(
+            $credential,
+            Carbon::parse('2026-10-17 09:00:00'),
+            Carbon::parse('2026-10-17 12:00:00'),
+        );
+
+        $this->assertSame([], $busy);
+        $credential->refresh();
+        $this->assertSame('refreshed-access-token', $credential->access_token);
+        $this->assertSame('refresh-token', $credential->refresh_token);
+        $this->assertTrue($credential->expires_at->isFuture());
+        $this->assertCount(2, $history);
+        $this->assertStringContainsString('/token', (string) $history[0]['request']->getUri());
+        $this->assertStringContainsString('/freeBusy', (string) $history[1]['request']->getUri());
+        $calendarRequest = $mockHandler->getLastRequest();
+        $this->assertNotNull($calendarRequest);
+        $this->assertSame(
+            'Bearer refreshed-access-token',
+            $calendarRequest->getHeaderLine('Authorization'),
+        );
     }
 
     /** @return array{GoogleCalendarService, GoogleCredential} */

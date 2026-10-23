@@ -111,6 +111,8 @@ http://localhost:8000 にアクセスし、下記の[ログインアカウント
 
 この機能はSailと既存のデモデータを使って確認できます。まず[環境構築手順](#環境構築手順)を完了し、`sail up -d`でアプリケーションを起動してください。Google設定を行わなくても、LMS内の空き枠表示・予約・キャンセルは従来どおり動作します。
 
+以下のコマンドは、特に記載がない限りプロジェクトルートのホスト側ターミナルで実行します。Google Cloud Consoleとブラウザ操作は同じ環境で行います。
+
 #### 1. Google Cloud側の準備
 
 Google Cloud Console（<https://console.cloud.google.com/>）へGoogleアカウントでログインします。画面名は変更される可能性があるため、必要に応じて公式ガイドも参照してください。
@@ -221,6 +223,8 @@ Google Calendar側でイベント作成が成功していても、通信断・�
 
 Gemini APIを利用した学習相談機能です。学習中（`in_progress`）の`student`のみ利用できます。`coach`、`admin`、卒業・退会・招待中の受講生は利用できません。
 
+以下のコマンドは、特に記載がない限りプロジェクトルートのホスト側ターミナルで実行します。Gemini APIキーの作成はGoogle AI Studioのブラウザで行い、動作確認はLMSのブラウザ画面で行います。
+
 - フル画面チャット：`http://localhost:8000/ai-chat`
 - Widget：学習画面の右下に表示（AIチャット機能が有効な学習中studentのみ）
 - Section画面から開始した相談は、Sectionと資格のコンテキストをAIへ渡します
@@ -294,11 +298,13 @@ Sailが起動していない場合は、先に共通手順どおり起動しま�
 
 新規、または破棄してよい開発DBでは、共通の初期化手順を実行します。
 
+`migrate:fresh --seed`は既存のテーブルとデータを削除してから、migrationとSeederを実行します。既存データを保持する環境では実行しないでください。
+
 ```bash
 ./vendor/bin/sail artisan migrate:fresh --seed
 ```
 
-`migrate:fresh`は既存テーブルとデータを削除するため、既存データを保持する環境では実行しないでください。
+実行後はログインアカウントと対象Sectionが作成されていることを確認します。既存データを残す場合は、このコマンドを実行せず、必要なmigrationまたは`AiChatSeeder`だけを実行してください。
 
 既存DBでは、データを保持するため通常のMigrationを実行します。
 
@@ -315,6 +321,8 @@ AIチャット確認用データだけを追加する場合は、固定student�
 `AiChatSeeder`は`local`または`testing`環境以外では実行されません。固定student（`student@certify-lms.test`）または対象Sectionが存在しない場合は警告して終了します。既存Conversationを無制限に増やさず、Gemini APIやDailyUsageを使用しません。
 
 `DatabaseSeeder`では、User・Enrollment・Content投入後に`AiChatSeeder`が呼び出されます。
+
+Gemini APIへ接続しないモックテストは、後述の「外部API連携テスト」を参照してください。
 
 #### 5. ログインと利用確認
 
@@ -366,38 +374,54 @@ AIタイトル生成はHTTPレスポンス送信後のLaravel `afterResponse`で
 - APIキーをコマンド引数やデバッグ出力へ直接記載しない。
 - 漏えいした可能性がある場合は、Google側でキーを無効化・再発行する。
 
-#### Gemini・Stripeについて
+### Stripe決済（S-A-03）
 
- Stripe Checkout（S-A-03）のローカル確認では、`.env`へテストモードの秘密値を設定します。秘密値はGit管理対象へ追加しません。
+Stripe CheckoutとWebhookを利用した面談回数購入機能です。
+
+Stripe Checkoutの実通信確認はStripeのテストモードを使用します。外部APIへ接続しないモックテストの実行方法は、前述の「外部API連携テスト」を参照してください。
+
+Stripe Checkout（S-A-03）のローカル確認では、`.env`へテストモードの秘密値を設定します。秘密値はGit管理対象へ追加しません。
+
+以下の設定・コマンドは、特に記載がない限りプロジェクトルートのホスト側ターミナルで実行します。Stripe CLIはホスト側のターミナルで起動し、LaravelのコマンドはSail経由で実行します。
+
+1. Stripe Dashboardのサンドボックス環境で、Developers → API keysからテスト用Secret key（`sk_test_...`）を取得し、`.env`の`STRIPE_SECRET`へ設定します。本番Dashboardのsecretや`sk_live_...`は使用しません。
 
 ```dotenv
 STRIPE_SECRET=sk_test_...
-STRIPE_WEBHOOK_SECRET=whsec_...
+STRIPE_WEBHOOK_SECRET=取得したWebhook Secret
 ```
 
-Stripe CLIでWebhookをローカルへ転送します。
+2. Stripe CLIは、使用するOSに合った[公式インストール手順](https://docs.stripe.com/stripe-cli)を参照してホスト側へインストールします。
 
-- [Stripe CLI公式インストール手順](https://docs.stripe.com/stripe-cli)
-- [Stripeテストカード公式一覧](https://docs.stripe.com/testing#cards)
+3. ホスト側ターミナルで次を実行し、ブラウザでStripeへの認証を完了します。
 
 ```bash
 stripe login
+```
+
+ブラウザが開かない場合の認証方法は、使用しているOSとStripe CLIの公式手順に従ってください。認証完了はCLIにログイン成功の表示が出ることで確認します。
+
+4. Checkoutを開始する前に、別のホスト側ターミナルでWebhook転送を開始します。
+
+```bash
 stripe listen \
   --events checkout.session.completed,checkout.session.expired \
   --forward-to http://localhost:8000/webhooks/stripe
 ```
 
-Stripe Dashboardのサンドボックス環境で、Developers → API keysからテスト用Secret key（`sk_test_...`）を取得し、`STRIPE_SECRET`へ設定します。`stripe listen`が表示するWebhook secret（`whsec_...`）を`STRIPE_WEBHOOK_SECRET`へ設定します。本番Dashboardのsecretや`sk_live_...`とは混同せず、設定変更後は次を実行してください。
+5. `stripe listen`の実行結果に表示される`whsec_...`を`.env`の`STRIPE_WEBHOOK_SECRET`へ設定します。
+
+6. プロジェクトルートのホスト側ターミナルで、Laravelへ設定を反映します。
 
 ```bash
 ./vendor/bin/sail artisan config:clear
 ```
 
-1. 受講中のstudentで`/meeting-quota/checkout`を開く。
-2. [Stripe公式テストカード一覧](https://docs.stripe.com/testing#cards)のカード番号でCheckoutを完了する。
-3. Stripe CLIにHTTP 200の転送結果が表示され、決済成功画面が表示されることを確認する。
-4. `payments`の`succeeded`、`meeting_quota_transactions`の`purchased`行、残面談回数を確認する。
-5. Stripe CLIの転送ログとアプリケーションログで署名エラー・照合不一致・一時障害を確認する。
+`config:clear`が完了したことを確認してからCheckoutを開始します。`stripe listen`は、Checkout・Webhook受信・DB確認・再送確認が終わるまで、別ターミナルで起動したままにしてください。
+
+7. 受講中のstudentで`/meeting-quota/checkout`を開き、[Stripe公式テストカード一覧](https://docs.stripe.com/testing#cards)のカード番号でCheckoutを完了します。
+8. Stripe CLIにHTTP 200の転送結果が表示され、決済成功画面が表示されることを確認します。`payments`の`succeeded`、`meeting_quota_transactions`の`purchased`行、残面談回数も確認します。
+9. Webhookイベントを再送し、Payment状態・購入取引件数・残面談回数が増えないことを確認します（詳細は「WebhookイベントIDの確認と再送」を参照）。Stripe CLIの転送ログとアプリケーションログで署名エラー・照合不一致・一時障害も確認します。
 
 #### WebhookイベントIDの確認と再送
 
@@ -685,6 +709,54 @@ echo json_encode([
 sail artisan test                  # 全テスト実行
 sail artisan test --filter=Xxx    # クラス名・メソッド名で絞り込み
 ```
+
+### 外部API連携テスト
+
+Google OAuth・Google Calendar、Gemini、Stripeの外部API連携テストは、実APIへ接続せずモックで実行します。
+
+外部API連携のモックテストは`external-api` Groupで実行できます。
+
+```bash
+sail artisan test --group external-api
+```
+
+未モック通信が拒否されることを確認する通信ガード専用テストは、`external-api-guard` Groupで実行できます。
+
+```bash
+sail artisan test --group external-api-guard
+```
+
+全テストは次のコマンドで実行できます。
+
+```bash
+sail artisan test
+```
+
+外部API連携テストを除外して実行する場合は、次を使用します。
+
+```bash
+sail artisan test --exclude-group external-api
+```
+
+`external-api`と`external-api-guard`は別Groupです。`external-api`を除外しても、通信ガード専用テストは自動的には除外されません。
+
+テスト時の通信制御は次のとおりです。
+
+- Laravel HTTP Client: `Http::preventStrayRequests()`で未モック通信を拒否します。`Http::fake()`で明示的にモックした通信は実行できます。
+- Google SDK: `GoogleClientFactory`経由で生成したClientへテスト用HTTPクライアントを注入し、実通信開始前に失敗させます。
+- Stripe SDK: テスト中だけHTTPクライアントを差し替え、テスト終了時に元のクライアントへ復元します。
+- Gemini: `Http::fake()`でHTTPレスポンスをモックします。
+
+これらのモックテストでは、Google CalendarのClient ID・Client Secret、Gemini APIキー、Stripe Secret・Webhook Secretなどの実値は不要です。テストコードが設定するダミー値またはモック応答だけを使用します。
+
+通信ガードには次の適用範囲があります。
+
+- `Http::preventStrayRequests()`だけで、Laravel HTTP Client以外の通信をすべて遮断するものではありません。
+- `GoogleClientFactory`を経由しないGoogle Clientは保証対象外です。
+- Stripe SDKのstreaming通信は対象外です。
+- 実APIを使う手動確認は、ここで説明するモックテストとは別に実施します。
+
+APIキー、Secret、TokenはGit、ログ、Issue、画面共有へ記載しないでください。実APIを使う手動確認については、Google Calendar、Gemini、Stripe各節の手順を参照してください。
 
 ## コード整形
 
