@@ -21,7 +21,7 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
-        Queue::createPayloadUsing(static function (string $connection, string $queue, array $payload): array {
+        Queue::createPayloadUsing(static function (string $connection, ?string $queue, array $payload): array {
             $command = $payload['data']['command'] ?? null;
             if ($command instanceof \App\Jobs\Meeting\MeetingReminderDatabaseNotificationJob) {
                 return ['meeting_reminder' => ['dispatch_id' => $command->dispatchId, 'channel' => 'database', 'dispatch_token' => $command->token, 'queue_attempt_uuid' => $command->queueAttemptUuid]];

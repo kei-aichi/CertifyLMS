@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 namespace App\UseCases\MeetingReminder;
+use App\UseCases\MeetingReminder\ResolveMeetingReminderRecipientAction;
 use App\Models\MeetingReminderDispatch;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
@@ -9,7 +10,7 @@ final class AcquireQueueDispatchAction
     public function __invoke(string $meetingId, string $window, string $recipientId): AcquireQueueDispatchResult
     {
         return DB::transaction(function () use ($meetingId, $window, $recipientId): AcquireQueueDispatchResult {
-            $context = (new ResolveMeetingReminderRecipient)($meetingId, $window, $recipientId);
+            $context = (new ResolveMeetingReminderRecipientAction)($meetingId, $window, $recipientId);
             if ($context === null) return AcquireQueueDispatchResult::newNotEligible();
             $meeting = $context->meeting; $recipient = $context->recipient;
             $existing = MeetingReminderDispatch::where(['meeting_id'=>$meeting->id,'window'=>$window,'recipient_id'=>$recipient->id])->lockForUpdate()->first();

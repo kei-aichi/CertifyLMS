@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 namespace App\UseCases\MeetingReminder;
+use App\UseCases\MeetingReminder\DTOs\MeetingReminderRecipientContext;
 use App\Enums\MeetingStatus;
 use App\Enums\UserRole;
 use App\Enums\UserStatus;
@@ -8,7 +9,7 @@ use App\Models\Meeting;
 use App\Models\User;
 use Carbon\CarbonImmutable;
 use InvalidArgumentException;
-final class ResolveMeetingReminderRecipient
+final class ResolveMeetingReminderRecipientAction
 {
     private const TZ = 'Asia/Tokyo';
     public function __invoke(string $meetingId, string $window, string $recipientId): ?MeetingReminderRecipientContext

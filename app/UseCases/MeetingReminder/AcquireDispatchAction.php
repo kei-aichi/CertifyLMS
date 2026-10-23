@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 namespace App\UseCases\MeetingReminder;
+use App\UseCases\MeetingReminder\ResolveMeetingReminderRecipientAction;
 
 use App\Models\MeetingReminderDispatch;
 use Illuminate\Database\QueryException;
@@ -19,7 +20,7 @@ final class AcquireDispatchAction
         bool $queueable = false,
     ): AcquireDispatchResult {
         return DB::transaction(function () use ($meetingId, $window, $recipientId, $queueable): AcquireDispatchResult {
-            $context = (new ResolveMeetingReminderRecipient)($meetingId, $window, $recipientId);
+            $context = (new ResolveMeetingReminderRecipientAction)($meetingId, $window, $recipientId);
             if ($context === null) return AcquireDispatchResult::notEligibleResult();
             $meeting = $context->meeting;
             $recipient = $context->recipient;

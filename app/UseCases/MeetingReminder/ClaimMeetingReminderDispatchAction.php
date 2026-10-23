@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 namespace App\UseCases\MeetingReminder;
+use App\UseCases\MeetingReminder\DTOs\MeetingReminderChannelClaim;
 use App\Enums\MeetingStatus;
 use App\Models\Meeting;
 use App\Models\MeetingReminderDispatch;
