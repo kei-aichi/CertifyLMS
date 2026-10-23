@@ -8,6 +8,7 @@ use App\Enums\MeetingStatus;
 use App\Jobs\Meeting\MeetingReminderMailNotificationJob;
 use App\Models\Meeting;
 use App\Models\MeetingReminderDispatch;
+use App\Models\MeetingReminderQueueAttempt;
 use App\Models\User;
 use App\Notifications\MeetingReminderNotification;
 use App\UseCases\MeetingReminder\AcquireQueueDispatchAction;
@@ -82,6 +83,45 @@ final class MeetingReminderMailNotificationJobTest extends TestCase
         $this->assertSame('failed', $dispatch->mail_status);
         $this->assertSame('pending', $dispatch->database_status);
         $this->assertSame(3, (int) \App\Models\NotificationDeliveryAttempt::query()->where('event_key', 'meeting_reminder:'.$dispatch->meeting_id.':'.$dispatch->window)->where('recipient_id', $dispatch->recipient_id)->where('channel', 'mail')->value('attempts'));
+    }
+
+    public function test_matching_attempt_uuid_in_preparing_state_sends_and_completes_ledger(): void
+    {
+        [$meeting, $student, $dispatch, $token] = $this->claimedDispatch();
+        $uuid = (string) \Illuminate\Support\Str::uuid();
+        MeetingReminderQueueAttempt::create(['queue_attempt_uuid' => $uuid, 'dispatch_id' => $dispatch->id, 'channel' => 'mail', 'dispatch_token' => $token, 'state' => 'preparing']);
+        Notification::fake();
+        (new MeetingReminderMailNotificationJob($dispatch->id, $token, $uuid))->handle();
+        Notification::assertSentTo($student, MeetingReminderNotification::class);
+        $this->assertSame('completed', MeetingReminderQueueAttempt::where('queue_attempt_uuid', $uuid)->value('state'));
+        $this->assertSame('pending', $dispatch->refresh()->database_status);
+    }
+
+    public function test_mismatched_attempt_uuid_does_not_send(): void
+    {
+        [, $student, $dispatch, $token] = $this->claimedDispatch();
+        $uuid = (string) \Illuminate\Support\Str::uuid();
+        MeetingReminderQueueAttempt::create(['queue_attempt_uuid' => $uuid, 'dispatch_id' => $dispatch->id, 'channel' => 'mail', 'dispatch_token' => $token, 'state' => 'preparing']);
+        Notification::fake();
+        (new MeetingReminderMailNotificationJob($dispatch->id, $token, (string) \Illuminate\Support\Str::uuid()))->handle();
+        Notification::assertNothingSent();
+        $this->assertSame('preparing', MeetingReminderQueueAttempt::where('queue_attempt_uuid', $uuid)->value('state'));
+        $this->assertSame('processing', $dispatch->refresh()->mail_status);
+    }
+
+    public function test_three_failures_mark_matching_attempt_failed(): void
+    {
+        [, , $dispatch, $token] = $this->claimedDispatch();
+        $uuid = (string) \Illuminate\Support\Str::uuid();
+        MeetingReminderQueueAttempt::create(['queue_attempt_uuid' => $uuid, 'dispatch_id' => $dispatch->id, 'channel' => 'mail', 'dispatch_token' => $token, 'state' => 'enqueued']);
+        Notification::shouldReceive('sendNow')->times(3)->andThrow(new \RuntimeException('smtp failure'));
+        $job = new MeetingReminderMailNotificationJob($dispatch->id, $token, $uuid);
+        try { $job->handle(); } catch (\Throwable) {}
+        try { $job->handle(); } catch (\Throwable) {}
+        try { $job->handle(); } catch (\Throwable) {}
+        $this->assertSame('failed', MeetingReminderQueueAttempt::where('queue_attempt_uuid', $uuid)->value('state'));
+        $this->assertSame('failed', $dispatch->refresh()->mail_status);
+        $this->assertSame('pending', $dispatch->database_status);
     }
 
     public function test_stale_token_legacy_succeeded_and_canceled_dispatches_are_skipped(): void

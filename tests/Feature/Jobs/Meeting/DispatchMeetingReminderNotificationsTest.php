@@ -10,6 +10,7 @@ use App\Jobs\Meeting\MeetingReminderDatabaseNotificationJob;
 use App\Jobs\Meeting\MeetingReminderMailNotificationJob;
 use App\Models\Meeting;
 use App\Models\MeetingReminderDispatch;
+use App\Models\MeetingReminderQueueAttempt;
 use App\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -30,6 +31,10 @@ final class DispatchMeetingReminderNotificationsTest extends TestCase
 
         Queue::assertPushed(MeetingReminderDatabaseNotificationJob::class, 1);
         Queue::assertPushed(MeetingReminderMailNotificationJob::class, 1);
+        $this->assertSame(2, MeetingReminderQueueAttempt::where('dispatch_id', $dispatch->id)->count());
+        $this->assertSame(2, MeetingReminderQueueAttempt::where('dispatch_id', $dispatch->id)->where('state', 'enqueued')->count());
+        Queue::assertPushed(MeetingReminderDatabaseNotificationJob::class, fn ($job) => MeetingReminderQueueAttempt::where('queue_attempt_uuid', $job->queueAttemptUuid)->where('channel', 'database')->exists());
+        Queue::assertPushed(MeetingReminderMailNotificationJob::class, fn ($job) => MeetingReminderQueueAttempt::where('queue_attempt_uuid', $job->queueAttemptUuid)->where('channel', 'mail')->exists());
         $dispatch->refresh();
         $this->assertSame('processing', $dispatch->database_status);
         $this->assertSame('processing', $dispatch->mail_status);

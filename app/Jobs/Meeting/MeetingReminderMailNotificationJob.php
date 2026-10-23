@@ -8,6 +8,7 @@ use App\Enums\MeetingStatus;
 use App\Enums\UserStatus;
 use App\Models\Meeting;
 use App\Models\MeetingReminderDispatch;
+use App\Models\MeetingReminderQueueAttempt;
 use App\Models\User;
 use App\Notifications\MeetingReminderNotification;
 use App\Services\Notifications\NotificationAttemptTracker;
@@ -32,6 +33,7 @@ final class MeetingReminderMailNotificationJob implements ShouldQueue
     public function __construct(
         public readonly string $dispatchId,
         public readonly string $token,
+        public readonly ?string $queueAttemptUuid = null,
     ) {}
 
     public function backoff(): array
@@ -52,6 +54,7 @@ final class MeetingReminderMailNotificationJob implements ShouldQueue
     {
         $reference = MeetingReminderDispatch::query()->find($this->dispatchId);
         if ($reference === null) return;
+        if ($this->queueAttemptUuid !== null && ! MeetingReminderQueueAttempt::query()->where('queue_attempt_uuid', $this->queueAttemptUuid)->where('dispatch_id', $this->dispatchId)->where('channel', 'mail')->where('dispatch_token', $this->token)->exists()) return;
 
         $context = DB::transaction(function () use ($reference): ?array {
             $meeting = Meeting::query()->with(['coach', 'student'])->lockForUpdate()->find($reference->meeting_id);
@@ -104,10 +107,12 @@ final class MeetingReminderMailNotificationJob implements ShouldQueue
     private function markSucceeded(string $dispatchId): void
     {
         MeetingReminderDispatch::query()->whereKey($dispatchId)->where('legacy', false)->where('mail_status', 'processing')->where('mail_dispatch_token', $this->token)->update(['mail_status' => 'succeeded', 'mail_completed_at' => now()]);
+        if ($this->queueAttemptUuid !== null) MeetingReminderQueueAttempt::query()->where('queue_attempt_uuid', $this->queueAttemptUuid)->where('dispatch_id', $dispatchId)->where('channel', 'mail')->where('dispatch_token', $this->token)->whereIn('state', ['preparing', 'enqueued'])->update(['state' => 'completed', 'completed_at' => now()]);
     }
 
     private function markFailed(string $dispatchId): void
     {
         MeetingReminderDispatch::query()->whereKey($dispatchId)->where('legacy', false)->where('mail_status', 'processing')->where('mail_dispatch_token', $this->token)->update(['mail_status' => 'failed', 'mail_completed_at' => now()]);
+        if ($this->queueAttemptUuid !== null) MeetingReminderQueueAttempt::query()->where('queue_attempt_uuid', $this->queueAttemptUuid)->where('dispatch_id', $dispatchId)->where('channel', 'mail')->where('dispatch_token', $this->token)->whereIn('state', ['preparing', 'enqueued'])->update(['state' => 'failed', 'failed_at' => now()]);
     }
 }

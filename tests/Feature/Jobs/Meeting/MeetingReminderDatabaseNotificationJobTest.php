@@ -8,6 +8,7 @@ use App\Enums\MeetingStatus;
 use App\Jobs\Meeting\MeetingReminderDatabaseNotificationJob;
 use App\Models\Meeting;
 use App\Models\MeetingReminderDispatch;
+use App\Models\MeetingReminderQueueAttempt;
 use App\Models\User;
 use App\UseCases\MeetingReminder\AcquireQueueDispatchAction;
 use App\UseCases\MeetingReminder\ClaimMeetingReminderDispatchAction;
@@ -32,6 +33,16 @@ final class MeetingReminderDatabaseNotificationJobTest extends TestCase
         $dispatch->refresh();
         $this->assertSame('succeeded', $dispatch->database_status);
         $this->assertSame('pending', $dispatch->mail_status);
+    }
+
+    public function test_preparing_attempt_can_execute_and_be_completed(): void
+    {
+        [$meeting, $student, $dispatch, $token] = $this->claimedDispatch();
+        $uuid = (string) \Illuminate\Support\Str::uuid();
+        MeetingReminderQueueAttempt::create(['queue_attempt_uuid' => $uuid, 'dispatch_id' => $dispatch->id, 'channel' => 'database', 'dispatch_token' => $token, 'state' => 'preparing']);
+        (new MeetingReminderDatabaseNotificationJob($dispatch->id, $token, $uuid))->handle();
+        $this->assertSame('completed', MeetingReminderQueueAttempt::where('queue_attempt_uuid', $uuid)->value('state'));
+        $this->assertDatabaseHas('notifications', ['notifiable_id' => $student->id, 'id' => MeetingReminderDatabaseNotificationJob::notificationId($meeting->id, 'eve', $student->id)]);
     }
 
     public function test_same_job_is_idempotent_and_stale_token_is_ignored(): void
