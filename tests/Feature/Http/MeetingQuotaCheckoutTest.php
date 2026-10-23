@@ -13,9 +13,11 @@ use App\Exceptions\MeetingQuota\CheckoutFulfillmentException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Event;
 use Mockery;
+use PHPUnit\Framework\Attributes\Group;
 use Stripe\Checkout\Session;
 use Tests\TestCase;
 
+#[Group('external-api')]
 class MeetingQuotaCheckoutTest extends TestCase
 {
     use RefreshDatabase;

@@ -7,6 +7,8 @@ namespace App\Services;
 use App\Enums\EnrollmentStatus;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cache;
+use RuntimeException;
 
 /**
  * Enrollment 集計を提供する Service。admin ダッシュボード KPI で利用される。
@@ -18,6 +20,10 @@ use Illuminate\Support\Facades\DB;
  */
 class EnrollmentStatsService
 {
+    public function __construct(
+        private readonly AdminDashboardCacheService $dashboardCache,
+    ) {}
+
     /**
      * 全体 KPI(learning / passed / failed 件数 + 資格別内訳)を返す。
      *
@@ -25,24 +31,30 @@ class EnrollmentStatsService
      */
     public function adminKpi(): array
     {
-        $counts = DB::table('enrollments')
-            ->whereNull('deleted_at')
-            ->selectRaw('status, COUNT(*) as cnt')
-            ->groupBy('status')
-            ->pluck('cnt', 'status')
-            ->all();
+        return $this->rememberConsistent(
+            (string) config('dashboard.admin_kpi_cache_key'),
+            $this->dashboardCache->kpiTtl(),
+            function (): array {
+                $counts = DB::table('enrollments')
+                    ->whereNull('deleted_at')
+                    ->selectRaw('status, COUNT(*) as cnt')
+                    ->groupBy('status')
+                    ->pluck('cnt', 'status')
+                    ->all();
 
-        $learning = (int) ($counts[EnrollmentStatus::Learning->value] ?? 0);
-        $passed = (int) ($counts[EnrollmentStatus::Passed->value] ?? 0);
-        $failed = (int) ($counts[EnrollmentStatus::Failed->value] ?? 0);
+                $learning = (int) ($counts[EnrollmentStatus::Learning->value] ?? 0);
+                $passed = (int) ($counts[EnrollmentStatus::Passed->value] ?? 0);
+                $failed = (int) ($counts[EnrollmentStatus::Failed->value] ?? 0);
 
-        return [
-            'learning_count' => $learning,
-            'passed_count' => $passed,
-            'failed_count' => $failed,
-            'total' => $learning + $passed + $failed,
-            'by_certification' => $this->byCertification(),
-        ];
+                return [
+                    'learning_count' => $learning,
+                    'passed_count' => $passed,
+                    'failed_count' => $failed,
+                    'total' => $learning + $passed + $failed,
+                    'by_certification' => $this->byCertification(),
+                ];
+            },
+        );
     }
 
     /**
@@ -77,15 +89,36 @@ class EnrollmentStatsService
      */
     public function completionRateByCertification(): Collection
     {
-        return collect($this->byCertification())
-            ->filter(fn (array $row): bool => $row['total'] > 0)
-            ->map(function (array $row): array {
-                $row['completion_rate'] = round($row['passed'] / $row['total'], 4);
+        return $this->rememberConsistent(
+            (string) config('dashboard.admin_completion_rate_cache_key'),
+            $this->dashboardCache->completionRateTtl(),
+            fn (): Collection => collect($this->byCertification())
+                ->filter(fn (array $row): bool => $row['total'] > 0)
+                ->map(function (array $row): array {
+                    $row['completion_rate'] = round($row['passed'] / $row['total'], 4);
 
-                return $row;
-            })
-            ->sortByDesc('total')
-            ->values();
+                    return $row;
+                })
+                ->sortByDesc('total')
+                ->values(),
+        );
+    }
+
+    private function rememberConsistent(string $logicalKey, int $ttl, callable $resolver): mixed
+    {
+        $attempts = $this->dashboardCache->retryLimit();
+
+        for ($attempt = 0; $attempt < $attempts; $attempt++) {
+            $version = $this->dashboardCache->version();
+            $key = $this->dashboardCache->versionedKey($logicalKey, $version);
+            $value = Cache::remember($key, $ttl, $resolver);
+
+            if ($this->dashboardCache->version() === $version) {
+                return $value;
+            }
+        }
+
+        throw new RuntimeException('Admin dashboard cache generation changed during aggregation.');
     }
 
     /**

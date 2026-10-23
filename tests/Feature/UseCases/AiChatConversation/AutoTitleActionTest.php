@@ -10,8 +10,10 @@ use App\Models\AiChatMessage;
 use App\UseCases\AiChatConversation\AutoTitleAction;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
+use PHPUnit\Framework\Attributes\Group;
 use Tests\TestCase;
 
+#[Group('external-api')]
 class AutoTitleActionTest extends TestCase
 {
     use RefreshDatabase;

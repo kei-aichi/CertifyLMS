@@ -13,6 +13,7 @@ use App\Models\ChatRoom;
 use App\Models\Enrollment;
 use App\Models\User;
 use App\Services\ChatMemberSyncService;
+use App\Services\AdminDashboardCacheService;
 use App\Services\DefaultEnrollmentService;
 use App\Services\EnrollmentStatusChangeService;
 use Illuminate\Support\Facades\DB;
@@ -37,6 +38,7 @@ final class StoreAction
         private readonly EnrollmentStatusChangeService $statusChanger,
         private readonly DefaultEnrollmentService $defaultEnrollmentService,
         private readonly ChatMemberSyncService $chatMemberSync,
+        private readonly AdminDashboardCacheService $dashboardCache,
     ) {}
 
     /**
@@ -90,6 +92,8 @@ final class StoreAction
             ]);
             $chatRoom->setRelation('enrollment', $enrollment->setRelation('certification', $certification));
             $this->chatMemberSync->syncForRoom($chatRoom);
+
+            DB::afterCommit(fn () => $this->dashboardCache->invalidate());
 
             return $enrollment;
         });

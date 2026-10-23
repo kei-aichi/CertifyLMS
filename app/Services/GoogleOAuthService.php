@@ -12,10 +12,12 @@ use RuntimeException;
 
 class GoogleOAuthService
 {
-    private const SCOPES = [
-        'https://www.googleapis.com/auth/calendar.freebusy',
-        'https://www.googleapis.com/auth/calendar.events.owned',
-    ];
+    private readonly GoogleClientFactory $clientFactory;
+
+    public function __construct(?GoogleClientFactory $clientFactory = null)
+    {
+        $this->clientFactory = $clientFactory ?? app(GoogleClientFactory::class);
+    }
 
     public function authorizationUrl(string $state): string
     {
@@ -64,14 +66,6 @@ class GoogleOAuthService
 
     protected function client(): Client
     {
-        $client = new Client;
-        $client->setClientId((string) config('services.google_calendar.client_id'));
-        $client->setClientSecret((string) config('services.google_calendar.client_secret'));
-        $client->setRedirectUri((string) config('services.google_calendar.redirect_uri'));
-        $client->setAccessType('offline');
-        $client->setPrompt('consent');
-        $client->setScopes(self::SCOPES);
-
-        return $client;
+        return $this->clientFactory->createOAuthClient();
     }
 }

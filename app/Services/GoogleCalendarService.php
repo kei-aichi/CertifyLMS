@@ -7,7 +7,6 @@ namespace App\Services;
 use App\Models\GoogleCredential;
 use App\Models\Meeting;
 use Carbon\Carbon;
-use Google\Client;
 use Google\Service\Calendar;
 use Google\Service\Calendar\Event;
 use Google\Service\Calendar\EventDateTime;
@@ -18,7 +17,14 @@ use RuntimeException;
 
 class GoogleCalendarService
 {
-    public function __construct(private readonly GoogleOAuthService $oauth) {}
+    private readonly GoogleClientFactory $clientFactory;
+
+    public function __construct(
+        private readonly GoogleOAuthService $oauth,
+        ?GoogleClientFactory $clientFactory = null,
+    ) {
+        $this->clientFactory = $clientFactory ?? app(GoogleClientFactory::class);
+    }
 
     /** @return list<array{start: Carbon, end: Carbon}> */
     public function freeBusy(?GoogleCredential $credential, Carbon $from, Carbon $to): array
@@ -120,8 +126,7 @@ class GoogleCalendarService
 
     protected function calendarClient(GoogleCredential $credential): Calendar
     {
-        $client = new Client;
-        $client->setAccessToken($this->oauth->accessToken($credential));
+        $client = $this->clientFactory->createCalendarClient($this->oauth->accessToken($credential));
 
         return new Calendar($client);
     }
