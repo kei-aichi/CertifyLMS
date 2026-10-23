@@ -6,6 +6,7 @@ namespace App\Console\Commands;
 
 use App\Enums\EnrollmentStatus;
 use App\Models\Enrollment;
+use App\Services\AdminDashboardCacheService;
 use App\Services\DefaultEnrollmentService;
 use App\Services\EnrollmentStatusChangeService;
 use Illuminate\Console\Command;
@@ -27,6 +28,7 @@ class FailExpiredEnrollmentsCommand extends Command
     public function handle(
         EnrollmentStatusChangeService $statusChanger,
         DefaultEnrollmentService $defaultEnrollmentService,
+        AdminDashboardCacheService $dashboardCache,
     ): int {
         $count = 0;
 
@@ -36,9 +38,9 @@ class FailExpiredEnrollmentsCommand extends Command
             ->whereNotNull('exam_date')
             ->whereDate('exam_date', '<', now()->toDateString())
             ->orderBy('id')
-            ->chunkById(100, function ($enrollments) use ($statusChanger, $defaultEnrollmentService, &$count): void {
+            ->chunkById(100, function ($enrollments) use ($statusChanger, $defaultEnrollmentService, $dashboardCache, &$count): void {
                 foreach ($enrollments as $enrollment) {
-                    DB::transaction(function () use ($enrollment, $statusChanger, $defaultEnrollmentService) {
+                    DB::transaction(function () use ($enrollment, $statusChanger, $defaultEnrollmentService, $dashboardCache) {
                         $enrollment->update(['status' => EnrollmentStatus::Failed->value]);
 
                         $statusChanger->recordStatusChange(
@@ -53,6 +55,8 @@ class FailExpiredEnrollmentsCommand extends Command
                             $enrollment->user,
                             $enrollment,
                         );
+
+                        DB::afterCommit(fn () => $dashboardCache->invalidate());
                     });
                     $count++;
                 }

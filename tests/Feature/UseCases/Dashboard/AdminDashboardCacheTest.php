@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 namespace Tests\Feature\UseCases\Dashboard;
 
-use App\Enums\EnrollmentStatus;
 use App\Models\Certification;
 use App\Models\Enrollment;
+use App\Models\MockExam;
+use App\Models\MockExamSession;
 use App\Models\User;
-use App\Services\EnrollmentStatusChangeService;
+use App\Services\AdminDashboardCacheService;
 use App\UseCases\Dashboard\FetchAdminDashboardAction;
+use App\UseCases\Enrollment\FailAction;
+use App\UseCases\Enrollment\ReceiveCertificateAction;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -18,7 +21,7 @@ use Tests\TestCase;
 /**
  * 管理者ダッシュボード集計のキャッシュ挙動を検証する Feature テスト。
  * 全体 KPI と資格別修了率の 2 キーそれぞれについて、連続表示で集計が Cache::remember から
- * 再利用されること(重い集計を再実行しない)と、受講状態の遷移(EnrollmentStatusChangeService)で
+ * 再利用されること(重い集計を再実行しない)と、受講状態の遷移(Action)で
  * 両キーが無効化され最新値に更新されること(片方の forget 漏れも検出する)を網羅する。
  */
 class AdminDashboardCacheTest extends TestCase
@@ -56,7 +59,7 @@ class AdminDashboardCacheTest extends TestCase
             'キャッシュヒット時は重い集計クエリが 1 本も発行されないはず',
         );
         $this->assertTrue(
-            Cache::has(config('dashboard.admin_kpi_cache_key')),
+            Cache::has(app(AdminDashboardCacheService::class)->versionedKey((string) config('dashboard.admin_kpi_cache_key'))),
             '管理者 KPI 集計がキャッシュキーに保存されているはず',
         );
     }
@@ -95,7 +98,7 @@ class AdminDashboardCacheTest extends TestCase
             'キャッシュヒット時は重い集計クエリが 1 本も発行されないはず',
         );
         $this->assertTrue(
-            Cache::has(config('dashboard.admin_completion_rate_cache_key')),
+            Cache::has(app(AdminDashboardCacheService::class)->versionedKey((string) config('dashboard.admin_completion_rate_cache_key'))),
             '資格別修了率の集計がキャッシュキーに保存されているはず',
         );
     }
@@ -109,24 +112,18 @@ class AdminDashboardCacheTest extends TestCase
         Cache::flush();
         app(FetchAdminDashboardAction::class)($admin);
 
-        // Act: 1 件を合格に遷移(状態遷移チョークポイント経由でキャッシュが無効化される)
+        // Act: FailAction 経由で 1 件を学習中止へ遷移
         $target = $enrollments->first();
-        $target->update(['status' => EnrollmentStatus::Passed]);
-        app(EnrollmentStatusChangeService::class)->recordStatusChange(
-            $target,
-            EnrollmentStatus::Learning,
-            EnrollmentStatus::Passed,
-            $admin,
-        );
+        app(FailAction::class)($target, $admin, 'テスト');
         $after = app(FetchAdminDashboardAction::class)($admin);
 
-        // Assert: KPI キャッシュが無効化され、最新の集計(learning 1 / passed 1)が返る
+        // Assert: KPI キャッシュが無効化され、最新の集計(learning 1 / failed 1)が返る
         $this->assertSame(
             1,
             $after->kpi['learning_count'],
             '状態遷移後は KPI キャッシュが無効化され、最新の受講中件数が返るはず',
         );
-        $this->assertSame(1, $after->kpi['passed_count']);
+        $this->assertSame(1, $after->kpi['failed_count']);
     }
 
     public function test_completion_rate_cache_is_invalidated_on_enrollment_status_change(): void
@@ -135,18 +132,14 @@ class AdminDashboardCacheTest extends TestCase
         $admin = User::factory()->admin()->inProgress()->create();
         $cert = Certification::factory()->published()->create();
         $enrollments = Enrollment::factory()->for($cert)->learning()->count(2)->create();
+        $exam = MockExam::factory()->for($cert)->create(['is_published' => true]);
+        MockExamSession::factory()->for($enrollments->first())->for($exam)->create(['pass' => true]);
         Cache::flush();
         app(FetchAdminDashboardAction::class)($admin);
 
-        // Act: 1 件を合格に遷移(状態遷移チョークポイント経由でキャッシュが無効化される)
+        // Act: ReceiveCertificateAction 経由で 1 件を修了へ遷移
         $target = $enrollments->first();
-        $target->update(['status' => EnrollmentStatus::Passed]);
-        app(EnrollmentStatusChangeService::class)->recordStatusChange(
-            $target,
-            EnrollmentStatus::Learning,
-            EnrollmentStatus::Passed,
-            $admin,
-        );
+        app(ReceiveCertificateAction::class)($target->refresh());
         $after = app(FetchAdminDashboardAction::class)($admin);
 
         // Assert: 修了率キャッシュも無効化され、最新の修了率(合格 1 / 全 2 = 0.5)が返る

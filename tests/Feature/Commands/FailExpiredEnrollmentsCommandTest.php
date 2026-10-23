@@ -7,6 +7,7 @@ namespace Tests\Feature\Commands;
 use App\Enums\EnrollmentStatus;
 use App\Models\Enrollment;
 use App\Models\User;
+use App\Services\AdminDashboardCacheService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -19,6 +20,7 @@ class FailExpiredEnrollmentsCommandTest extends TestCase
         $expired1 = Enrollment::factory()->learning()->create(['exam_date' => now()->subDay()->toDateString()]);
         $expired2 = Enrollment::factory()->learning()->create(['exam_date' => now()->subDays(7)->toDateString()]);
         $futureExam = Enrollment::factory()->learning()->create(['exam_date' => now()->addDay()->toDateString()]);
+        $versionBefore = app(AdminDashboardCacheService::class)->version();
 
         $this->artisan('enrollments:fail-expired')
             ->assertExitCode(0)
@@ -27,15 +29,18 @@ class FailExpiredEnrollmentsCommandTest extends TestCase
         $this->assertSame(EnrollmentStatus::Failed, $expired1->fresh()->status);
         $this->assertSame(EnrollmentStatus::Failed, $expired2->fresh()->status);
         $this->assertSame(EnrollmentStatus::Learning, $futureExam->fresh()->status);
+        $this->assertSame($versionBefore + 2, app(AdminDashboardCacheService::class)->version());
     }
 
     public function test_enrollment_without_exam_date_is_skipped(): void
     {
         $noExamDate = Enrollment::factory()->learning()->create(['exam_date' => null]);
+        $versionBefore = app(AdminDashboardCacheService::class)->version();
 
         $this->artisan('enrollments:fail-expired')->assertExitCode(0);
 
         $this->assertSame(EnrollmentStatus::Learning, $noExamDate->fresh()->status);
+        $this->assertSame($versionBefore, app(AdminDashboardCacheService::class)->version());
     }
 
     public function test_passed_or_failed_enrollments_are_not_affected_even_if_exam_date_expired(): void

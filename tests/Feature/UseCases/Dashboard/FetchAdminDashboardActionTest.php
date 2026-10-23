@@ -100,4 +100,26 @@ class FetchAdminDashboardActionTest extends TestCase
         $this->assertFalse(property_exists($vm, 'recentNotifications'));
         $this->assertFalse(property_exists($vm, 'unreadNotificationCount'));
     }
+
+    public function test_completion_rate_null_when_service_throws_while_kpi_remains_available(): void
+    {
+        $admin = User::factory()->admin()->inProgress()->create();
+        $kpi = [
+            'learning_count' => 1,
+            'passed_count' => 0,
+            'failed_count' => 0,
+            'total' => 1,
+            'by_certification' => [],
+        ];
+
+        $mock = Mockery::mock(EnrollmentStatsService::class);
+        $mock->shouldReceive('adminKpi')->andReturn($kpi);
+        $mock->shouldReceive('completionRateByCertification')->andThrow(new \RuntimeException('failure'));
+        $this->app->instance(EnrollmentStatsService::class, $mock);
+
+        $vm = app(FetchAdminDashboardAction::class)($admin);
+
+        $this->assertSame($kpi, $vm->kpi);
+        $this->assertNull($vm->completionRateByCertification);
+    }
 }

@@ -1,0 +1,19 @@
+# T-A-06 修正後SQL計測
+
+実施日: 2026-10-23 (Asia/Tokyo)
+ブランチ: feature/T-A-06
+
+## 実測方法
+
+Sail内の一時的な`artisan tinker --execute`で、DB listenerを登録した。既存Cacheをflushせず、計測専用の一意な世代キー・論理キーとarray Cacheを設定し、同一`EnrollmentStatsService`インスタンスで各メソッドを2回呼び出した。Cacheストア自身のSQLはarray Cacheのため発生しない。
+
+## 実測結果
+
+| 対象 | 初回集計SQL | 2回目集計SQL | 返却値一致 |
+|---|---:|
+| `EnrollmentStatsService::adminKpi()` | 2 | 0 | true |
+| `EnrollmentStatsService::completionRateByCertification()` | 1 | 0 | true |
+
+返却値比較は、KPI配列および修了率Collectionを配列化して比較した。両方とも一致した。
+
+Cacheストア自身のSQLは、今回のarray Cacheテストでは発生しない。database CacheストアのSQL本数は未計測。

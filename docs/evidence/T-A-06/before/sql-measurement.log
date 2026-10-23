@@ -1,0 +1,22 @@
+# T-A-06 修正前SQL計測
+
+計測日時: 2026-10-23 (Asia/Tokyo)
+ブランチ: feature/T-A-06
+計測方法: Sail内の一時的な `artisan tinker --execute` で `DB::listen()` を登録し、同一 `EnrollmentStatsService` インスタンスで各メソッドを2回呼び出した。
+データ変更: なし
+
+## 実行環境
+
+- APP_ENV: local
+- DB connection: mysql
+- DB database: certify_lms
+- Cache store: database
+
+## 実測結果
+
+| 対象 | 初回集計SQL | 2回目集計SQL | 初回合計時間(ms) | 2回目合計時間(ms) | 結果一致 |
+|---|---:|---:|---:|---:|---|
+| `adminKpi()` | 2 | 2 | 15.39 | 0.35 | true |
+| `completionRateByCertification()` | 1 | 1 | 0.13B | 0.13 | true |
+
+集計SQLはSQL文字列に`enrollments`または`certifications`を含むものとして分類した。今回の現行実装にはDashboard集計キャッシュがないため、2回目も集計SQLが実行された。

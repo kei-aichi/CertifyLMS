@@ -10,6 +10,7 @@ use App\Exceptions\Enrollment\EnrollmentNotLearningException;
 use App\Models\Certificate;
 use App\Models\Enrollment;
 use App\Services\CertificatePdfService;
+use App\Services\AdminDashboardCacheService;
 use App\Services\CompletionEligibilityService;
 use App\Services\EnrollmentStatusChangeService;
 use App\UseCases\Certificate\IssueAction as IssueCertificateAction;
@@ -41,6 +42,7 @@ final class ReceiveCertificateAction
         private readonly EnrollmentStatusChangeService $statusChanger,
         private readonly IssueCertificateAction $issueCertificate,
         private readonly CertificatePdfService $certificatePdf,
+        private readonly AdminDashboardCacheService $dashboardCache,
     ) {}
 
     /**
@@ -76,6 +78,8 @@ final class ReceiveCertificateAction
 
                 $certificate = ($this->issueCertificate)($enrollment->refresh());
                 $this->certificatePdf->generateAndStore($certificate);
+
+                DB::afterCommit(fn () => $this->dashboardCache->invalidate());
 
                 // コールバック完了後のコミット例外では、DBの永続化結果が不明なためPDFを削除しない。
                 $transactionCallbackCompleted = true;
