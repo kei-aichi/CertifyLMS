@@ -57,11 +57,15 @@ alias sail='./vendor/bin/sail'
 
 以降のコマンドはこのエイリアス前提で記載します（未設定の場合は `./vendor/bin/sail` に読み替えてください）。
 
+このaliasは現在開いているターミナルのセッションに対して有効です。新しいターミナルを開いた場合は、再度設定してください。
+
 ### 5. コンテナの起動
 
 ```bash
 sail up -d
 ```
+
+初回起動時はDockerイメージの取得やLaravel Sailアプリケーションのビルドが行われるため、通常より時間がかかる場合があります。
 
 ### 6. アプリケーションの初期化
 
@@ -74,6 +78,20 @@ sail artisan migrate:fresh --seed
 ```
 
 `storage:link` は教材画像・プロフィール画像の配信に必要です。`migrate:fresh --seed` でテーブル作成とデモデータ投入が行われます（いつでも再実行してデータを初期状態に戻せます）。
+
+### 通常起動
+
+初回環境構築が完了した後、Webアプリケーションを起動する場合は次を実行します。
+
+```bash
+sail up -d
+```
+
+通常起動では `migrate:fresh --seed` を実行しません。既存データを保持したままMigrationだけを適用する場合は、次を実行します。
+
+```bash
+sail artisan migrate
+```
 
 ### 7. フロントエンドのビルド
 
@@ -154,12 +172,13 @@ GOOGLE_CALENDAR_REDIRECT_URI=http://localhost:8000/settings/google-calendar/call
 `.env.example`には空値とローカル用リダイレクトURIを記載済みです。設定変更後、実行中のSailコンテナへ反映するため、次を実行します。
 
 ```bash
-sail config:clear
 sail up -d --force-recreate
 sail artisan optimize:clear
 ```
 
-`config:clear`が利用できない場合は、`./vendor/bin/sail`に読み替えてください。設定値の確認は秘密値を表示しない形で行います。
+Google CalendarのClient ID、Client Secret、Redirect URIなど、コンテナへ渡すGoogle Calendar関連の環境変数を変更した場合は、実行中のコンテナへ反映するため `--force-recreate` を使用します。その他の`.env`変更についても、変更した値がコンテナの環境変数として読み込まれる構成の場合は、同じ手順が必要です。`.env`を変更していない通常の起動では、`sail up -d` で構いません。
+
+設定値の確認は秘密値を表示しない形で行います。
 
 ```bash
 sail artisan tinker --execute="dump(config('services.google_calendar.client_id') !== null, config('services.google_calendar.redirect_uri'));"
@@ -169,12 +188,11 @@ sail artisan tinker --execute="dump(config('services.google_calendar.client_id')
 
 #### 3. デモCredentialと実OAuth連携の違い
 
-`migrate:fresh --seed`または`db:seed`をローカル・テスト環境で実行すると、`coach@certify-lms.test`にデモCredentialが1件作成されます。これはGoogle APIへ送信できないダミー値です。
+`migrate:fresh --seed`または`db:seed`をローカル・テスト環境で実行すると、`coach@certify-lms.test`に画面上の「連携済み」状態を再現するダミーCredentialが1件作成されます。このCredentialは実際のGoogle OAuthトークンではなく、Google APIへ接続できません。実Google Calendarとの連携確認には、必ずコーチ本人のアカウントでOAuth連携を実行してください。
 
-- `coach@certify-lms.test`：デモ上は連携済み。ただし実Google APIには接続できません。
+- `coach@certify-lms.test`：デモ上は連携済みです。
 - `coach2@certify-lms.test`：未連携。Google APIを呼ばず、従来のLMS判定を確認できます。
 - `GoogleCalendarSeeder`は`local`・`testing`環境だけで実行され、既存Credentialを`firstOrCreate`で上書きしません。
-- 実Google確認には、後述の手順でコーチ本人がOAuth連携してください。
 
 #### 4. 実Googleアカウントで連携する
 
@@ -213,7 +231,7 @@ Google Calendar側でイベント作成が成功していても、通信断・�
 
 | 症状 | 確認箇所 |
 |---|---|
-| `redirect_uri_mismatch` | `.env`の`GOOGLE_CALENDAR_REDIRECT_URI`とGoogle Cloudの承認済みURIが完全一致しているか確認し、`sail artisan optimize:clear`後にコンテナを再起動する |
+| `redirect_uri_mismatch` | `.env`の`GOOGLE_CALENDAR_REDIRECT_URI`とGoogle Cloudの承認済みURIが完全一致しているか確認し、`.env`を変更した場合は `sail up -d --force-recreate` の後に `sail artisan optimize:clear` を実行する |
 | `access_denied` | OAuth同意画面のテストユーザーに、ログイン中のGoogleアカウントを追加する |
 | OAuthクライアントが見つからない | `.env`のClient ID・Secretが同じGoogle Cloudプロジェクトのものか確認する。値をログへ出さない |
 | 連携開始時に設定エラー | `.env`の3変数、`config/services.php`の参照名、Sailコンテナの再作成を確認する |
@@ -302,7 +320,7 @@ Sailが起動していない場合は、先に共通手順どおり起動しま�
 
 新規、または破棄してよい開発DBでは、共通の初期化手順を実行します。
 
-`migrate:fresh --seed`は既存のテーブルとデータを削除してから、migrationとSeederを実行します。既存データを保持する環境では実行しないでください。
+既存データを保持する場合は`migrate:fresh --seed`を実行せず、[環境構築手順](#環境構築手順)の注意事項を確認してください。
 
 ```bash
 ./vendor/bin/sail artisan migrate:fresh --seed
@@ -475,7 +493,7 @@ SeederのStripe IDはローカル確認用のダミー値です。Stripe APIへ�
 ./vendor/bin/sail artisan migrate
 ```
 
-`migrate:fresh --seed`は開発環境のデータを初期化するため、共有環境や本番環境では実行しないでください。
+既存データを保持する場合は`migrate:fresh --seed`を実行せず、[環境構築手順](#環境構築手順)の注意事項を確認してください。共有環境や本番環境では実行しないでください。
 
 一時障害ではWebhookがHTTP 500を返して再送対象になります。未払い・恒久的不一致はHTTP 200で受信し、加算しません。秘密鍵、Webhook secret、カード情報はREADMEやログへ記載しません。
 
@@ -755,7 +773,29 @@ sail artisan queue:failed
 
 `queue:retry all`は全failed Jobを再投入するため、通常の確認手順では実行しません。特に面談リマインダーの復旧には使用しないでください。
 
-### 面談リマインダーの失敗Job復旧
+## Scheduler
+
+Schedulerは、期限切れEnrollment処理、招待期限切れ処理、学習セッションの自動クローズ、面談の自動完了、面談リマインダーなど、時刻に基づく定期処理を実行します。対象スケジュールは`app/Console/Kernel.php`に定義されています。
+
+WebアプリケーションおよびQueue Workerとは別のターミナルで、次を実行してください。
+
+```bash
+sail artisan schedule:work
+```
+
+Schedulerは定期実行Commandを起動するプロセスです。通知・メールの非同期Jobを処理するには、Queue Workerも別途起動してください。停止する場合は`Ctrl+C`を押してください。
+
+### 開発中に起動するプロセス
+
+| プロセス | コマンド | 役割 |
+|---|---|---|
+| Webアプリケーション | `sail up -d` | Laravel、MySQL、Mailpit等を起動 |
+| Queue Worker | `sail artisan queue:work database --queue=default --timeout=120` | Queueに投入された通知・メール等のJobを処理 |
+| Scheduler | `sail artisan schedule:work` | 定期実行Commandを起動 |
+
+Queue WorkerとSchedulerは、Webアプリケーションのコンテナ起動とは別に、必要な機能を確認する場合のみ起動してください。
+
+## 面談リマインダーの失敗Job復旧
 
 面談リマインダーの失敗Jobは、対象のdispatch・チャネル・`failed_jobs.uuid`を指定して専用Commandで復旧します。
 
@@ -784,7 +824,7 @@ sail artisan meeting-reminders:retry 01dispatch... mail 550e8400-e29b-41d4-a716-
 
 標準の`queue:retry all`は、対象外のfailed Jobまで再投入し、チャネル・dispatch・tokenの照合やMeetingの状態確認を行いません。面談リマインダーは必ず`meeting-reminders:retry`で対象を限定します。
 
-#### `unknown`状態の扱い
+### `unknown`状態の扱い
 
 Queue投入処理中にプロセス停止や例外が発生すると、Queue投入成否を確定できないQueue attemptが`unknown`になることがあります。これは、QueueにJobが存在する場合と存在しない場合を安全に区別できない状態です。
 
@@ -803,7 +843,7 @@ Mailチャネルは、外部送信成功後に状態更新前の停止が起こ�
 Meetingが開始済み、キャンセル済み、またはrecipient Userが無効の場合は、失敗Jobであっても送信しません。
 
 testing DBで検証する場合は、開発DBへ接続していないことを確認し、Mailpit以外のSMTPへ送信しないでください。検証用workerは対象Queueだけを処理し、既存の`failed_jobs`を全件retry・削除しないでください。
-### 外部API連携テスト
+## 外部API連携テスト
 
 Google OAuth・Google Calendar、Gemini、Stripeの外部API連携テストは、実APIへ接続せずモックで実行します。
 
