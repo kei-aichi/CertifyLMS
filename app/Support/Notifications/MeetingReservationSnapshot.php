@@ -1,0 +1,5 @@
+<?php
+declare(strict_types=1);
+namespace App\Support\Notifications;
+use App\Models\Meeting; use App\Models\User;
+final class MeetingReservationSnapshot { public static function fromMeeting(Meeting $m):array{$m->loadMissing(['coach','student']);return ['meeting_id'=>(string)$m->id,'scheduled_at'=>$m->scheduled_at?->toISOString(),'coach_id'=>(string)$m->coach_id,'coach_name'=>$m->coach?->name,'student_id'=>(string)$m->student_id,'student_name'=>$m->student?->name];} public static function toMeeting(array $s):Meeting{$m=new Meeting(['id'=>$s['meeting_id'],'scheduled_at'=>$s['scheduled_at'],'coach_id'=>$s['coach_id'],'student_id'=>$s['student_id']]);$m->exists=true;$m->setRawAttributes(array_merge($m->getAttributes(),['id'=>$s['meeting_id'],'scheduled_at'=>$s['scheduled_at'],'coach_id'=>$s['coach_id'],'student_id'=>$s['student_id']]));$coach=(new User)->newInstance(['id'=>$s['coach_id'],'name'=>$s['coach_name']]);$student=(new User)->newInstance(['id'=>$s['student_id'],'name'=>$s['student_name']]);$m->setRelation('coach',$coach);$m->setRelation('student',$student);return $m;}}

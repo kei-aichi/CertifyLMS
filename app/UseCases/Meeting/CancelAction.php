@@ -13,7 +13,8 @@ use App\Exceptions\Mentoring\MeetingStatusTransitionException;
 use App\Models\Meeting;
 use App\Models\MeetingQuotaTransaction;
 use App\Models\User;
-use App\Notifications\MeetingCanceledNotification;
+use App\Jobs\Meeting\DispatchMeetingCanceledNotifications;
+use App\Support\Notifications\MeetingCancellationSnapshot;
 use App\Services\GoogleCalendarService;
 use App\UseCases\MeetingQuota\RefundQuotaAction;
 use Illuminate\Support\Facades\DB;
@@ -64,16 +65,9 @@ final class CancelAction
 
             ($this->refundAction)($locked->student, $locked->id);
 
-            DB::afterCommit(function () use ($locked, $actor): void {
-                $locked->loadMissing(['coach', 'student', 'canceledBy']);
-                $recipient = match ($actor->id) {
-                    $locked->student_id => $locked->coach,
-                    $locked->coach_id => $locked->student,
-                    default => null,
-                };
-                if ($recipient !== null && $recipient->status === UserStatus::InProgress) {
-                    $recipient->notify(new MeetingCanceledNotification($locked));
-                }
+            $notificationSnapshot = MeetingCancellationSnapshot::fromMeeting($locked, $actor);
+            DB::afterCommit(function () use ($notificationSnapshot): void {
+                DispatchMeetingCanceledNotifications::dispatch($notificationSnapshot);
             });
 
             return $locked->fresh();

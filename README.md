@@ -19,6 +19,8 @@
 
 ## 環境構築手順
 
+以降のコマンドは、cloneしたリポジトリのルートディレクトリ（`artisan`ファイルがあるディレクトリ）で実行してください。
+
 ### 1. リポジトリの clone
 
 ```bash
@@ -62,6 +64,8 @@ sail up -d
 ```
 
 ### 6. アプリケーションの初期化
+
+> `migrate:fresh --seed`は既存の開発DBを削除してから、MigrationとSeederを実行します。既存データを保持する場合は実行せず、`sail artisan migrate`を使用してください。
 
 ```bash
 sail artisan key:generate
@@ -710,6 +714,95 @@ sail artisan test                  # 全テスト実行
 sail artisan test --filter=Xxx    # クラス名・メソッド名で絞り込み
 ```
 
+## Queue worker（Database Queue）
+
+以下はリポジトリルートで実行してください。通知・メールの非同期処理を実行するには、Database Queue workerを起動します。
+
+### 起動前の設定確認
+
+`.env.example`では、次のローカル設定を使用します。
+
+- Queue接続：`QUEUE_CONNECTION=database`
+- Database Queue：`after_commit=true`
+- Queueの再取得待ち時間：`retry_after=180`
+- SMTP：`MAIL_HOST=mailpit`、`MAIL_PORT=1025`
+
+実行中のSailコンテナが読み込んでいる設定は、次で確認できます。秘密情報は表示しません。
+
+```bash
+sail artisan tinker --execute="echo 'queue='.config('queue.default').PHP_EOL; echo 'after_commit='.(config('queue.connections.database.after_commit') ? 'true' : 'false').PHP_EOL; echo 'smtp='.config('mail.mailers.smtp.host').':'.config('mail.mailers.smtp.port').PHP_EOL;"
+```
+
+`queue=database`、`after_commit=true`、`smtp=mailpit:1025`が表示されることを確認してください。
+
+### Workerの起動
+
+別のターミナルで次を実行してください。
+
+```bash
+sail artisan queue:work database --queue=default --timeout=120
+```
+
+`retry_after`は180秒、workerの`--timeout`は120秒です。workerを起動していない場合、投入されたJobは`jobs`テーブルに残り、通知は処理されません。
+
+停止は`Ctrl+C`で行います。失敗Jobの確認と再投入は次のコマンドで行います。
+
+```bash
+sail artisan queue:failed
+```
+
+`queue:failed`は失敗したJobの一覧確認だけを行います。worker起動後は、対象Jobが処理されて`jobs`から消えること、アプリケーション画面の通知、Mailpit（<http://localhost:8025>）のメールを確認してください。既存データを変更したくない場合は、検証用データを用意してから確認してください。
+
+`queue:retry all`は全failed Jobを再投入するため、通常の確認手順では実行しません。特に面談リマインダーの復旧には使用しないでください。
+
+### 面談リマインダーの失敗Job復旧
+
+面談リマインダーの失敗Jobは、対象のdispatch・チャネル・`failed_jobs.uuid`を指定して専用Commandで復旧します。
+
+```bash
+sail artisan meeting-reminders:retry <dispatch_id> <database|mail> <failed_jobs.uuid>
+```
+
+上の`<...>`を含むコマンドは、そのまま実行できません。山括弧内を実際の値に置き換えてください。
+
+- `dispatch_id`：対象の面談リマインダー配信台帳のID。対象Jobのpayload metadataと`meeting_reminder_dispatches`を照合して取得します。
+- `database|mail`：復旧するチャネル。Database通知なら`database`、メールなら`mail`を指定します。
+- `failed_jobs.uuid`：`sail artisan queue:failed`で確認した対象failed Jobの`uuid`列の値です。
+
+例（値は検証対象に置き換えてください）：
+
+```bash
+sail artisan meeting-reminders:retry 01dispatch... mail 550e8400-e29b-41d4-a716-446655440000
+```
+
+実行前に、`queue:failed`で対象UUIDを確認し、指定したJobのpayload metadataと次の値が一致することを確認してください。
+
+- dispatch ID
+- channel（`database`または`mail`）
+- dispatch token
+- Queue attempt UUID
+
+標準の`queue:retry all`は、対象外のfailed Jobまで再投入し、チャネル・dispatch・tokenの照合やMeetingの状態確認を行いません。面談リマインダーは必ず`meeting-reminders:retry`で対象を限定します。
+
+#### `unknown`状態の扱い
+
+Queue投入処理中にプロセス停止や例外が発生すると、Queue投入成否を確定できないQueue attemptが`unknown`になることがあります。これは、QueueにJobが存在する場合と存在しない場合を安全に区別できない状態です。
+
+`unknown`は自動再投入および通常の`meeting-reminders:retry`の対象外です。管理者は次の情報を確認し、送信状況を確定できない場合は再投入せず、PMまたは運用責任者へエスカレーションしてください。
+
+- dispatch IDとchannel
+- dispatch token
+- Queue attempt UUIDとstate
+- `jobs`テーブルの対象Queue Job
+- `failed_jobs`テーブルの対象failed Job
+- Meetingの状態と開始時刻
+- recipient Userの存在・status・role
+
+Mailチャネルは、外部送信成功後に状態更新前の停止が起こると送信結果を確定できず、再投入によって重複メールになる可能性があります。確認なしで再投入しないでください。
+
+Meetingが開始済み、キャンセル済み、またはrecipient Userが無効の場合は、失敗Jobであっても送信しません。
+
+testing DBで検証する場合は、開発DBへ接続していないことを確認し、Mailpit以外のSMTPへ送信しないでください。検証用workerは対象Queueだけを処理し、既存の`failed_jobs`を全件retry・削除しないでください。
 ### 外部API連携テスト
 
 Google OAuth・Google Calendar、Gemini、Stripeの外部API連携テストは、実APIへ接続せずモックで実行します。

@@ -9,6 +9,7 @@ use App\Models\Meeting;
 use App\Models\MeetingReminderDispatch;
 use App\Models\User;
 use App\UseCases\MeetingReminder\AcquireDispatchAction;
+use App\UseCases\MeetingReminder\AcquireQueueDispatchAction;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -39,6 +40,61 @@ class AcquireDispatchActionTest extends TestCase
         $this->assertTrue($studentResult->acquired());
         $this->assertTrue($coachResult->acquired());
         $this->assertSame(2, MeetingReminderDispatch::count());
+    }
+
+    public function test_queue_acquisition_explicitly_creates_pending_non_legacy_row(): void
+    {
+        CarbonImmutable::setTestNow('2026-10-10 18:00:30', 'Asia/Tokyo');
+        [$meeting, $student] = $this->createMeeting('2026-10-11 10:00:00');
+
+        $result = (new AcquireQueueDispatchAction)($meeting->id, 'eve', $student->id);
+
+        $this->assertTrue($result->acquired());
+        $this->assertDatabaseHas('meeting_reminder_dispatches', [
+            'meeting_id' => $meeting->id,
+            'window' => 'eve',
+            'recipient_id' => $student->id,
+            'legacy' => 0,
+            'database_status' => 'pending',
+            'mail_status' => 'pending',
+        ]);
+    }
+
+    public function test_queue_acquisition_does_not_recreate_legacy_history(): void
+    {
+        CarbonImmutable::setTestNow('2026-10-10 18:00:30', 'Asia/Tokyo');
+        [$meeting, $student] = $this->createMeeting('2026-10-11 10:00:00');
+        MeetingReminderDispatch::create([
+            'meeting_id' => $meeting->id,
+            'window' => 'eve',
+            'recipient_id' => $student->id,
+        ]);
+
+        $result = (new AcquireQueueDispatchAction(new AcquireDispatchAction))($meeting->id, 'eve', $student->id);
+
+        $this->assertTrue($result->is('duplicate_legacy'));
+        $this->assertSame(1, MeetingReminderDispatch::count());
+        $this->assertTrue(MeetingReminderDispatch::first()->isLegacy());
+    }
+
+    public function test_queue_acquisition_resumes_incomplete_dispatch(): void
+    {
+        CarbonImmutable::setTestNow('2026-10-10 18:00:30', 'Asia/Tokyo');
+        [$meeting, $student] = $this->createMeeting('2026-10-11 10:00:00');
+        $dispatch = MeetingReminderDispatch::create(['meeting_id'=>$meeting->id,'window'=>'eve','recipient_id'=>$student->id,'legacy'=>false,'database_status'=>'succeeded','mail_status'=>'pending']);
+        $result = (new AcquireQueueDispatchAction)($meeting->id, 'eve', $student->id);
+        $this->assertTrue($result->is('resume_pending'));
+        $this->assertSame($dispatch->id, $result->dispatch?->id);
+    }
+
+    public function test_queue_acquisition_returns_duplicate_for_completed_dispatch(): void
+    {
+        CarbonImmutable::setTestNow('2026-10-10 18:00:30', 'Asia/Tokyo');
+        [$meeting, $student] = $this->createMeeting('2026-10-11 10:00:00');
+        $dispatch = MeetingReminderDispatch::create(['meeting_id'=>$meeting->id,'window'=>'eve','recipient_id'=>$student->id,'legacy'=>false,'database_status'=>'succeeded','mail_status'=>'succeeded']);
+        $result = (new AcquireQueueDispatchAction)($meeting->id, 'eve', $student->id);
+        $this->assertTrue($result->is('duplicate'));
+        $this->assertSame($dispatch->id, $result->dispatch?->id);
     }
 
     public function test_only_the_matching_window_and_minute_is_accepted(): void

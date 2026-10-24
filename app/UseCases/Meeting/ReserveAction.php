@@ -12,7 +12,8 @@ use App\Models\Certification;
 use App\Models\Enrollment;
 use App\Models\Meeting;
 use App\Models\User;
-use App\Notifications\MeetingReservedNotification;
+use App\Jobs\Meeting\DispatchMeetingReservedNotifications;
+use App\Support\Notifications\MeetingReservationSnapshot;
 use App\Services\CoachMeetingLoadService;
 use App\Services\GoogleCalendarService;
 use App\Services\MeetingAvailabilityService;
@@ -77,12 +78,9 @@ final class ReserveAction
             $transaction = ($this->consumeAction)($student, $meeting->id);
             $meeting->update(['meeting_quota_transaction_id' => $transaction->id]);
 
-            DB::afterCommit(function () use ($meeting): void {
-                $meeting->loadMissing('coach');
-                $coach = $meeting->coach;
-                if ($coach !== null && $coach->status === UserStatus::InProgress) {
-                    $coach->notify(new MeetingReservedNotification($meeting));
-                }
+            $notificationSnapshot = MeetingReservationSnapshot::fromMeeting($meeting);
+            DB::afterCommit(function () use ($notificationSnapshot): void {
+                DispatchMeetingReservedNotifications::dispatch($notificationSnapshot);
             });
 
             return $meeting->fresh();

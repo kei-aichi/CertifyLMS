@@ -6,8 +6,9 @@ namespace App\Console\Commands\Notifications;
 
 use App\Enums\MeetingStatus;
 use App\Models\Meeting;
-use App\UseCases\MeetingReminder\SendReminderAction;
-use App\UseCases\MeetingReminder\SendReminderResult;
+use App\Jobs\Meeting\DispatchMeetingReminderNotifications;
+use App\UseCases\MeetingReminder\AcquireQueueDispatchAction;
+use App\UseCases\MeetingReminder\AcquireQueueDispatchResult;
 use Carbon\CarbonImmutable;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
@@ -20,6 +21,8 @@ final class SendMeetingRemindersCommand extends Command
     /** @var array<string, int> */
     private const INITIAL_SUMMARY = [
         'acquired' => 0,
+        'resume_pending' => 0,
+        'duplicate_legacy' => 0,
         'not_eligible' => 0,
         'duplicate' => 0,
         'skipped' => 0,
@@ -33,7 +36,7 @@ final class SendMeetingRemindersCommand extends Command
     /** @var array<string, int> */
     private array $summary = self::INITIAL_SUMMARY;
 
-    public function handle(SendReminderAction $sendReminder): int
+    public function handle(AcquireQueueDispatchAction $acquireQueueDispatch): int
     {
         $this->summary = self::INITIAL_SUMMARY;
 
@@ -61,10 +64,10 @@ final class SendMeetingRemindersCommand extends Command
                 ->where('scheduled_at', '<', $windowEnd->format('Y-m-d H:i:s'))
                 ->where('scheduled_at', '>', $now->format('Y-m-d H:i:s'))
                 ->orderBy('id')
-                ->chunkById(100, function ($meetings) use ($sendReminder, $window): void {
+                ->chunkById(100, function ($meetings) use ($acquireQueueDispatch, $window): void {
                     foreach ($meetings as $meeting) {
                         foreach ([$meeting->student_id, $meeting->coach_id] as $recipientId) {
-                            $this->processRecipient($sendReminder, $meeting->id, $window, $recipientId);
+                            $this->processRecipient($acquireQueueDispatch, $meeting->id, $window, $recipientId);
                         }
                     }
                 });
@@ -79,8 +82,9 @@ final class SendMeetingRemindersCommand extends Command
         }
 
         $this->info(sprintf(
-            'Meeting reminders processed: acquired=%d, not_eligible=%d, duplicate=%d, skipped=%d, failed=%d.',
+            'Meeting reminders queued: acquired=%d, resume_pending=%d, not_eligible=%d, duplicate=%d, skipped=%d, failed=%d.',
             $this->summary['acquired'],
+            $this->summary['resume_pending'],
             $this->summary['not_eligible'],
             $this->summary['duplicate'],
             $this->summary['skipped'],
@@ -91,14 +95,17 @@ final class SendMeetingRemindersCommand extends Command
     }
 
     private function processRecipient(
-        SendReminderAction $sendReminder,
+        AcquireQueueDispatchAction $acquireQueueDispatch,
         string $meetingId,
         string $window,
         string $recipientId,
     ): void {
         try {
-            $result = $sendReminder($meetingId, $window, $recipientId);
+            $result = $acquireQueueDispatch($meetingId, $window, $recipientId);
             $this->collect($result);
+            if ($result->acquired() || ($result->is('resume_pending') && $result->dispatch !== null && ($result->dispatch->database_status === 'pending' || $result->dispatch->mail_status === 'pending'))) {
+                DispatchMeetingReminderNotifications::dispatch($result->dispatch->id);
+            }
         } catch (Throwable $exception) {
             $this->summary['failed']++;
             Log::error('Meeting reminder recipient failed.', [
@@ -112,21 +119,10 @@ final class SendMeetingRemindersCommand extends Command
         }
     }
 
-    private function collect(SendReminderResult $result): void
+    private function collect(AcquireQueueDispatchResult $result): void
     {
-        if ($result->acquisitionStatus === 'acquired') {
-            $this->summary['acquired']++;
-        } elseif (isset($this->summary[$result->acquisitionStatus])) {
-            $this->summary[$result->acquisitionStatus]++;
-        }
-
-        foreach ([$result->databaseStatus, $result->mailStatus] as $status) {
-            if (in_array($status, ['failed'], true)) {
-                $this->summary['failed']++;
-            } elseif ($status === 'skipped_after_start' || $status === 'skipped') {
-                $this->summary['skipped']++;
-            }
-        }
+        if (isset($this->summary[$result->status])) $this->summary[$result->status]++;
+        if ($result->status === 'duplicate_legacy') $this->summary['duplicate']++;
     }
 
     /** @return array{0: CarbonImmutable, 1: CarbonImmutable} */

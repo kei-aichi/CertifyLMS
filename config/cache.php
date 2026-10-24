@@ -49,6 +49,7 @@ return [
             'table' => 'cache',
             'connection' => null,
             'lock_connection' => null,
+            'lock_table' => 'cache_locks',
         ],
 
         'file' => [

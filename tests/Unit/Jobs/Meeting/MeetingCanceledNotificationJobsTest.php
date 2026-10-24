@@ -1,0 +1,5 @@
+<?php
+declare(strict_types=1);
+namespace Tests\Unit\Jobs\Meeting;
+use App\Jobs\Meeting\MeetingCanceledDatabaseNotificationJob; use App\Support\Notifications\MeetingCancellationSnapshot; use Tests\TestCase;
+final class MeetingCanceledNotificationJobsTest extends TestCase {public function test_uuid_and_snapshot_relations_are_stable():void{$s=['meeting_id'=>'m1','scheduled_at'=>'2026-01-01T10:00:00+00:00','coach_id'=>'c1','coach_name'=>'コーチ名','student_id'=>'s1','student_name'=>'受講生名','canceled_by_user_id'=>'s1','canceled_by_name'=>'受講生名'];$m=MeetingCancellationSnapshot::toMeeting($s);$this->assertSame('コーチ名',$m->coach->name);$this->assertSame('受講生名',$m->student->name);$this->assertSame('受講生名',$m->canceledBy->name);$id=MeetingCanceledDatabaseNotificationJob::notificationId('m1','c1');$this->assertSame($id,MeetingCanceledDatabaseNotificationJob::notificationId('m1','c1'));$this->assertNotSame($id,MeetingCanceledDatabaseNotificationJob::notificationId('m2','c1'));$m->loadMissing(['coach','student','canceledBy']);$this->assertSame('コーチ名',$m->coach->name);}}
