@@ -63,6 +63,7 @@ final class MeetingAvailabilityService
 
         /** @var array<string, int> $slotCounts スロット開始時刻(H:i) → available coach 数 */
         $slotCounts = [];
+        $now = now();
 
         $googleBusyByCoach = [];
         foreach ($coaches as $coach) {
@@ -89,6 +90,12 @@ final class MeetingAvailabilityService
             while ($slot->copy()->addHour() <= $end) {
                 $slotKey = $slot->format('H:i');
                 $coachId = $availability->coach_id;
+
+                if ($slot->lessThanOrEqualTo($now)) {
+                    $slot->addHour();
+                    continue;
+                }
+
                 $booked = $bookedByCoach[$coachId] ?? [];
 
                 $slotEnd = $slot->copy()->addHour();

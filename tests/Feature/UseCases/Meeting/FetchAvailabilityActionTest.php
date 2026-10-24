@@ -22,6 +22,20 @@ final class FetchAvailabilityActionTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        Carbon::setTestNow(Carbon::parse('2026-05-31 12:00:00', 'Asia/Tokyo'));
+    }
+
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+
+        parent::tearDown();
+    }
+
     public function test_returns_slots_for_enrollment_certification_and_requested_date(): void
     {
         $certification = Certification::factory()->published()->create();
