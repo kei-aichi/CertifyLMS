@@ -190,10 +190,9 @@ sail artisan tinker --execute="dump(config('services.google_calendar.client_id')
 
 `migrate:fresh --seed`または`db:seed`をローカル・テスト環境で実行すると、`coach@certify-lms.test`に画面上の「連携済み」状態を再現するダミーCredentialが1件作成されます。このCredentialは実際のGoogle OAuthトークンではなく、Google APIへ接続できません。実Google Calendarとの連携確認には、必ずコーチ本人のアカウントでOAuth連携を実行してください。
 
-- `coach@certify-lms.test`：デモ上は連携済み。ただし実Google APIには接続できません。
+- `coach@certify-lms.test`：デモ上は連携済みです。
 - `coach2@certify-lms.test`：未連携。Google APIを呼ばず、従来のLMS判定を確認できます。
 - `GoogleCalendarSeeder`は`local`・`testing`環境だけで実行され、既存Credentialを`firstOrCreate`で上書きしません。
-- 実Google確認には、後述の手順でコーチ本人がOAuth連携してください。
 
 #### 4. 実Googleアカウントで連携する
 
@@ -321,7 +320,7 @@ Sailが起動していない場合は、先に共通手順どおり起動しま�
 
 新規、または破棄してよい開発DBでは、共通の初期化手順を実行します。
 
-`migrate:fresh --seed`は既存のテーブルとデータを削除してから、migrationとSeederを実行します。既存データを保持する環境では実行しないでください。
+既存データを保持する場合は`migrate:fresh --seed`を実行せず、[環境構築手順](#環境構築手順)の注意事項を確認してください。
 
 ```bash
 ./vendor/bin/sail artisan migrate:fresh --seed
@@ -494,7 +493,7 @@ SeederのStripe IDはローカル確認用のダミー値です。Stripe APIへ�
 ./vendor/bin/sail artisan migrate
 ```
 
-`migrate:fresh --seed`は開発環境のデータを初期化するため、共有環境や本番環境では実行しないでください。
+既存データを保持する場合は`migrate:fresh --seed`を実行せず、[環境構築手順](#環境構築手順)の注意事項を確認してください。共有環境や本番環境では実行しないでください。
 
 一時障害ではWebhookがHTTP 500を返して再送対象になります。未払い・恒久的不一致はHTTP 200で受信し、加算しません。秘密鍵、Webhook secret、カード情報はREADMEやログへ記載しません。
 
