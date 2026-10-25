@@ -7,6 +7,7 @@ namespace App\UseCases\MockExam;
 use App\Enums\MockExamSessionStatus;
 use App\Exceptions\MockExam\MockExamInUseException;
 use App\Models\MockExam;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -38,6 +39,16 @@ final class DestroyAction
             throw MockExamInUseException::forActiveSessions();
         }
 
-        DB::transaction(fn () => $mockExam->delete());
+        try {
+            DB::transaction(fn () => $mockExam->delete());
+        } catch (QueryException $exception) {
+            if ((int) ($exception->errorInfo[1] ?? 0) === 1451
+                && (str_contains($exception->getMessage(), 'mock_exam_sessions_mock_exam_id_foreign')
+                    || str_contains($exception->getMessage(), 'mock_exam_answers_mock_exam_question_id_foreign'))) {
+                throw MockExamInUseException::forHistoricalData($exception);
+            }
+
+            throw $exception;
+        }
     }
 }

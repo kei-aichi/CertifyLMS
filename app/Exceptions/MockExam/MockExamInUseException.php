@@ -24,6 +24,14 @@ final class MockExamInUseException extends ConflictHttpException
         return new self('受験中または採点待ちのセッションが残っているため、模試を削除できません。');
     }
 
+    public static function forHistoricalData(?\Throwable $previous = null): self
+    {
+        return new self(
+            'この模試には受験履歴または解答履歴が存在するため、削除できません。',
+            $previous,
+        );
+    }
+
     private function __construct(string $message, ?\Throwable $previous = null)
     {
         parent::__construct($message, $previous);

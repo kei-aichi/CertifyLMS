@@ -6,6 +6,9 @@ namespace Tests\Feature\Http\MockExam;
 
 use App\Models\Certification;
 use App\Models\MockExam;
+use App\Models\MockExamAnswer;
+use App\Models\MockExamQuestion;
+use App\Models\MockExamQuestionOption;
 use App\Models\MockExamSession;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -243,5 +246,146 @@ class CrudTest extends TestCase
             ->assertRedirect();
 
         $this->assertDatabaseMissing('mock_exams', ['id' => $mockExam->id]);
+    }
+
+    public function test_destroy_rejects_when_canceled_session_exists_for_html_request(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $mockExam = MockExam::factory()->draft()->create();
+        $session = MockExamSession::factory()
+            ->forMockExam($mockExam)
+            ->canceled()
+            ->create();
+
+        $response = $this->actingAs($admin)
+            ->from(route('admin.mock-exams.show', $mockExam))
+            ->delete(route('admin.mock-exams.destroy', $mockExam));
+
+        $response
+            ->assertRedirect(route('admin.mock-exams.show', $mockExam))
+            ->assertSessionHas('error', 'この模試には受験履歴または解答履歴が存在するため、削除できません。');
+        $this->assertHistoricalDataIsPreserved($mockExam, $session);
+    }
+
+    public function test_destroy_rejects_when_canceled_session_exists_for_json_request(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $mockExam = MockExam::factory()->draft()->create();
+        $session = MockExamSession::factory()
+            ->forMockExam($mockExam)
+            ->canceled()
+            ->create();
+
+        $this->actingAs($admin)
+            ->deleteJson(route('admin.mock-exams.destroy', $mockExam))
+            ->assertStatus(409)
+            ->assertJsonPath('message', 'この模試には受験履歴または解答履歴が存在するため、削除できません。');
+
+        $this->assertHistoricalDataIsPreserved($mockExam, $session);
+    }
+
+    public function test_destroy_rejects_when_graded_session_exists_for_html_request(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $mockExam = MockExam::factory()->draft()->create();
+        $session = MockExamSession::factory()
+            ->forMockExam($mockExam)
+            ->graded()
+            ->create();
+
+        $response = $this->actingAs($admin)
+            ->from(route('admin.mock-exams.show', $mockExam))
+            ->delete(route('admin.mock-exams.destroy', $mockExam));
+
+        $response
+            ->assertRedirect(route('admin.mock-exams.show', $mockExam))
+            ->assertSessionHas('error', 'この模試には受験履歴または解答履歴が存在するため、削除できません。');
+        $this->assertHistoricalDataIsPreserved($mockExam, $session);
+    }
+
+    public function test_destroy_rejects_when_graded_session_exists_for_json_request(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $mockExam = MockExam::factory()->draft()->create();
+        $session = MockExamSession::factory()
+            ->forMockExam($mockExam)
+            ->graded()
+            ->create();
+
+        $this->actingAs($admin)
+            ->deleteJson(route('admin.mock-exams.destroy', $mockExam))
+            ->assertStatus(409)
+            ->assertJsonPath('message', 'この模試には受験履歴または解答履歴が存在するため、削除できません。');
+
+        $this->assertHistoricalDataIsPreserved($mockExam, $session);
+    }
+
+    public function test_destroy_rejects_when_answer_history_exists_for_html_request(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $mockExam = MockExam::factory()->draft()->create();
+        $question = MockExamQuestion::factory()->forMockExam($mockExam)->create();
+        $option = MockExamQuestionOption::factory()->forQuestion($question)->correct()->create();
+        $session = MockExamSession::factory()
+            ->forMockExam($mockExam)
+            ->canceled()
+            ->create();
+        $answer = MockExamAnswer::factory()->create([
+            'mock_exam_session_id' => $session->id,
+            'mock_exam_question_id' => $question->id,
+            'selected_option_id' => $option->id,
+        ]);
+
+        // 回答履歴を作成するため受験セッションも存在し、両方のFK制約が削除を阻止し得る。
+        // 本テストは削除拒否・HTTP応答・関連データ保持を検証し、FKの評価順序には依存しない。
+        // 回答FKの制約名による例外変換はDestroyActionTestで別途検証する。
+        $response = $this->actingAs($admin)
+            ->from(route('admin.mock-exams.show', $mockExam))
+            ->delete(route('admin.mock-exams.destroy', $mockExam));
+
+        $response
+            ->assertRedirect(route('admin.mock-exams.show', $mockExam))
+            ->assertSessionHas('error', 'この模試には受験履歴または解答履歴が存在するため、削除できません。');
+        $this->assertHistoricalDataIsPreserved($mockExam, $session);
+        $this->assertDatabaseHas('mock_exam_questions', ['id' => $question->id]);
+        $this->assertDatabaseHas('mock_exam_answers', ['id' => $answer->id]);
+    }
+
+    public function test_destroy_rejects_when_answer_history_exists_for_json_request(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $mockExam = MockExam::factory()->draft()->create();
+        $question = MockExamQuestion::factory()->forMockExam($mockExam)->create();
+        $option = MockExamQuestionOption::factory()->forQuestion($question)->correct()->create();
+        $session = MockExamSession::factory()
+            ->forMockExam($mockExam)
+            ->canceled()
+            ->create();
+        $answer = MockExamAnswer::factory()->create([
+            'mock_exam_session_id' => $session->id,
+            'mock_exam_question_id' => $question->id,
+            'selected_option_id' => $option->id,
+        ]);
+
+        // 回答履歴を作成するため受験セッションも存在し、両方のFK制約が削除を阻止し得る。
+        // 本テストは削除拒否・HTTP応答・関連データ保持を検証し、FKの評価順序には依存しない。
+        // 回答FKの制約名による例外変換はDestroyActionTestで別途検証する。
+        $this->actingAs($admin)
+            ->deleteJson(route('admin.mock-exams.destroy', $mockExam))
+            ->assertStatus(409)
+            ->assertJsonPath('message', 'この模試には受験履歴または解答履歴が存在するため、削除できません。');
+
+        $this->assertHistoricalDataIsPreserved($mockExam, $session);
+        $this->assertDatabaseHas('mock_exam_questions', ['id' => $question->id]);
+        $this->assertDatabaseHas('mock_exam_answers', ['id' => $answer->id]);
+    }
+
+    private function assertHistoricalDataIsPreserved(MockExam $mockExam, MockExamSession $session): void
+    {
+        $this->assertDatabaseHas('mock_exams', ['id' => $mockExam->id]);
+        $this->assertDatabaseHas('mock_exam_sessions', [
+            'id' => $session->id,
+            'mock_exam_id' => $mockExam->id,
+        ]);
     }
 }
