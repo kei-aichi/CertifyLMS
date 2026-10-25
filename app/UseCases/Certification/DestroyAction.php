@@ -20,17 +20,32 @@ final class DestroyAction
                 $certification = Certification::query()->lockForUpdate()->findOrFail($certification->id);
                 // SoftDelete済みでもFKの参照は残るため、通常Relationの件数だけで判定しない。
                 if ($certification->status !== CertificationStatus::Draft
-                    || $certification->enrollments()->withTrashed()->exists()) {
+                    || $certification->enrollments()->withTrashed()->exists()
+                    || $certification->parts()->exists()
+                    || $certification->certificates()->exists()
+                    || $certification->mockExams()->exists()
+                    || $certification->questionCategories()->exists()
+                    || DB::table('qa_threads')->where('certification_id', $certification->id)->exists()
+                    || DB::table('announcements')->where('target_certification_id', $certification->id)->exists()) {
                     throw new CertificationNotDeletableException;
                 }
 
-                // Q&Aによる削除禁止はDBのrestrict制約に任せ、投稿を連鎖削除しない。
                 $certification->delete();
             });
         } catch (QueryException $exception) {
-            // MySQLのQ&A参照制約違反だけを業務上の削除拒否へ変換する。他のSQL障害は隠さない。
+            $restrictedForeignKeys = [
+                'parts_certification_id_foreign',
+                'enrollments_certification_id_foreign',
+                'certificates_certification_id_foreign',
+                'mock_exams_certification_id_foreign',
+                'qa_threads_certification_id_foreign',
+                'question_categories_certification_id_foreign',
+                'announcements_target_certification_id_foreign',
+            ];
+
             if ((int) ($exception->errorInfo[1] ?? 0) === 1451
-                && str_contains($exception->getMessage(), 'qa_threads_certification_id_foreign')) {
+                && collect($restrictedForeignKeys)
+                    ->contains(fn (string $constraint) => str_contains($exception->getMessage(), $constraint))) {
                 throw new CertificationNotDeletableException($exception);
             }
 

@@ -19,14 +19,29 @@ final class ContentNotDeletableException extends ConflictHttpException
         return self::build('Part');
     }
 
+    public static function forPartChildren(): self
+    {
+        return self::buildChildren('Part');
+    }
+
     public static function forChapter(): self
     {
         return self::build('Chapter');
     }
 
+    public static function forChapterChildren(): self
+    {
+        return self::buildChildren('Chapter');
+    }
+
     public static function forSection(): self
     {
         return self::build('Section');
+    }
+
+    public static function forSectionRelatedData(): self
+    {
+        return self::buildChildren('Section');
     }
 
     public static function forSectionQuestion(): self
@@ -38,6 +53,14 @@ final class ContentNotDeletableException extends ConflictHttpException
     {
         return new self(sprintf(
             '公開中の%sは削除できません。先に下書きに戻してから削除してください。',
+            $entityLabel,
+        ));
+    }
+
+    private static function buildChildren(string $entityLabel): self
+    {
+        return new self(sprintf(
+            '%sに子データまたは関連データが存在するため削除できません。',
             $entityLabel,
         ));
     }

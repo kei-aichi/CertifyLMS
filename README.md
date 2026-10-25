@@ -823,6 +823,15 @@ sail artisan test --filter=Xxx    # クラス名・メソッド名で絞り込�
 - バックエンドで期限切れ枠を除外し、フロントエンドでも枠の選択時・予約送信時に期限切れを再判定するようにしました。
 - 期限切れを検出した場合は選択状態を解除し、空き枠を再取得します。
 
+#### Issue #93：資格・教材削除時の外部キー制約エラー修正
+
+- [資格・教材削除時の外部キー制約エラー修正](https://github.com/kei-aichi/CertifyLMS/issues/93)
+- Certification、Part、Chapter、Sectionについて、Draftのみ削除可能とし、受講登録（SoftDelete済みを含む）や関連する子データ・履歴が存在する場合は削除を拒否するようにしました。
+- 既存の外部キー制約とコーチ割当のcascadeOnDeleteを維持し、削除禁止対象の関連データは連鎖削除しません。
+- Section削除時のAIチャット会話は保持し、section_idのみNULLにします。
+- 削除不可時はSQL例外画面ではなく日本語の業務エラーを表示し、HTMLではFlash error、JSONではHTTP 409を返します。
+- 既存の認可と削除成功時の遷移先は維持します。
+
 ### 2026年10月25日時点の全体テスト結果
 
 PHP 8.5.12およびLaravel 10.50.2の環境で、次のコマンドを実行しました。
@@ -831,8 +840,8 @@ PHP 8.5.12およびLaravel 10.50.2の環境で、次のコマンドを実行し�
 docker compose exec laravel.test php artisan test
 ```
 
-- 成功テスト：2,309件
-- Assertions：7,695件
+- 成功テスト：2,354件
+- Assertions：7,835件
 - 失敗：0件
 
 ## Queue worker（Database Queue）

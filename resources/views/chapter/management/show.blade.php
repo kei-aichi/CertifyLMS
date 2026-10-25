@@ -170,7 +170,7 @@
         <x-content-management.delete-confirm-modal
             id="chapter-delete-modal"
             title="Chapter を削除しますか？"
-            description="Chapter を削除します。配下の Section も一緒に削除されます。"
+            description="子データまたは関連データが存在するChapterは削除できません。"
             :action="route('admin.chapters.destroy', $chapter)"
         />
     @else

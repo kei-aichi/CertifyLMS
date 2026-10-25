@@ -7,6 +7,7 @@ namespace App\UseCases\Chapter;
 use App\Enums\ContentStatus;
 use App\Exceptions\Content\ContentNotDeletableException;
 use App\Models\Chapter;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -23,6 +24,19 @@ final class DestroyAction
             throw ContentNotDeletableException::forChapter();
         }
 
-        DB::transaction(fn () => $chapter->delete());
+        if ($chapter->sections()->exists()) {
+            throw ContentNotDeletableException::forChapterChildren();
+        }
+
+        try {
+            DB::transaction(fn () => $chapter->delete());
+        } catch (QueryException $exception) {
+            if ((int) ($exception->errorInfo[1] ?? 0) === 1451
+                && str_contains($exception->getMessage(), 'sections_chapter_id_foreign')) {
+                throw ContentNotDeletableException::forChapterChildren();
+            }
+
+            throw $exception;
+        }
     }
 }
