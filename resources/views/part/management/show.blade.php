@@ -162,7 +162,7 @@
         <x-content-management.delete-confirm-modal
             id="part-delete-modal"
             title="Part を削除しますか？"
-            description="Part を削除します。配下の Chapter / Section も一緒に削除されます。"
+            description="子データまたは関連データが存在するPartは削除できません。"
             :action="route('admin.parts.destroy', $part)"
             button-label="削除する"
         />
