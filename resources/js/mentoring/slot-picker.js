@@ -31,6 +31,10 @@ function isPast(date, today) {
     return date < new Date(today.getFullYear(), today.getMonth(), today.getDate());
 }
 
+function isExpiredSlot(slot) {
+    return new Date(slot.slot_start) <= new Date();
+}
+
 class SlotPicker {
     constructor(root) {
         this.root = root;
@@ -45,6 +49,7 @@ class SlotPicker {
         this.slotsRoot = this.form?.querySelector('[data-slots-grid]');
         this.slotsTitle = this.form?.querySelector('[data-slots-title]');
         this.slotsEmpty = this.form?.querySelector('[data-slots-empty]');
+        this.slotMessage = this.form?.querySelector('[data-slot-message]');
         this.selectionLabel = this.form?.querySelector('[data-selection-label]');
         this.scheduledInput = this.form?.querySelector('[data-scheduled-input]');
         this.submitButton = this.form?.querySelector('[data-submit-button]');
@@ -54,6 +59,9 @@ class SlotPicker {
         this.selectedDate = null;
         this.selectedSlot = null;
         this.slotCache = new Map();
+        this.currentSlots = [];
+        this.requestSequence = 0;
+        this.loadingSlots = false;
 
         this.bindEvents();
         this.renderCalendar();
@@ -67,6 +75,7 @@ class SlotPicker {
             this.renderCalendar();
             this.selectDate(this.today);
         });
+        this.form?.addEventListener('submit', (event) => this.handleSubmit(event));
     }
 
     shiftMonth(delta) {
@@ -137,14 +146,19 @@ class SlotPicker {
     async selectDate(date) {
         this.selectedDate = new Date(date);
         this.selectedSlot = null;
+        this.currentSlots = [];
+        this.clearSlotMessage();
         this.renderCalendar();
         this.updateSelection();
 
         if (!this.endpoint || !this.slotsRoot) {
-            return;
+            return false;
         }
 
         const key = ymd(date);
+        const isToday = isSameDay(date, new Date());
+        const requestId = ++this.requestSequence;
+        this.loadingSlots = true;
         if (this.slotsTitle) {
             this.slotsTitle.textContent = `${date.getMonth() + 1}月${date.getDate()}日 (${WEEKDAY_JA[date.getDay()]}) の空き枠`;
         }
@@ -152,20 +166,37 @@ class SlotPicker {
         this.slotsEmpty?.classList.add('hidden');
 
         try {
-            const slots = this.slotCache.has(key)
+            const slots = !isToday && this.slotCache.has(key)
                 ? this.slotCache.get(key)
                 : (await getJson(`${this.endpoint}?date=${encodeURIComponent(key)}`)).slots ?? [];
-            this.slotCache.set(key, slots);
+            if (requestId !== this.requestSequence) {
+                return false;
+            }
+            if (!isToday) {
+                this.slotCache.set(key, slots);
+            }
+            this.currentSlots = slots;
             this.renderSlots(slots);
         } catch (error) {
+            if (requestId !== this.requestSequence) {
+                return false;
+            }
+            this.currentSlots = [];
             this.slotsRoot.innerHTML = `<div class="col-span-2 text-sm text-danger-600 py-4 text-center">空き枠の取得に失敗しました。再度お試しください。</div>`;
+            return false;
+        } finally {
+            if (requestId === this.requestSequence) {
+                this.loadingSlots = false;
+            }
         }
+        return true;
     }
 
     renderSlots(slots) {
         if (!this.slotsRoot) {
             return;
         }
+        this.currentSlots = slots;
         this.slotsRoot.innerHTML = '';
         if (slots.length === 0) {
             this.slotsEmpty?.classList.remove('hidden');
@@ -173,7 +204,14 @@ class SlotPicker {
         }
         this.slotsEmpty?.classList.add('hidden');
 
-        slots.forEach((slot) => {
+        const availableSlots = slots.filter((slot) => !isExpiredSlot(slot));
+        if (availableSlots.length === 0) {
+            this.slotsEmpty?.classList.remove('hidden');
+            return;
+        }
+        this.slotsEmpty?.classList.add('hidden');
+
+        availableSlots.forEach((slot) => {
             const button = document.createElement('button');
             button.type = 'button';
             const start = new Date(slot.slot_start);
@@ -203,14 +241,59 @@ class SlotPicker {
     }
 
     selectSlot(slot) {
-        this.selectedSlot = slot;
-        if (this.selectedDate) {
-            const cachedSlots = this.slotCache.get(ymd(this.selectedDate));
-            if (cachedSlots) {
-                this.renderSlots(cachedSlots);
-            }
+        if (this.loadingSlots || isExpiredSlot(slot)) {
+            this.expireSelectionAndRefresh();
+            return;
         }
+        this.selectedSlot = slot;
+        this.renderSlots(this.currentSlots);
         this.updateSelection();
+    }
+
+    async handleSubmit(event) {
+        if (!this.selectedSlot || !isExpiredSlot(this.selectedSlot)) {
+            return;
+        }
+
+        event.preventDefault();
+        await this.expireSelectionAndRefresh();
+    }
+
+    async expireSelectionAndRefresh() {
+        this.selectedSlot = null;
+        this.updateSelection();
+
+        const date = this.selectedDate ? new Date(this.selectedDate) : null;
+        if (!date) {
+            this.showSlotMessage('error', '最新の予約枠を取得できませんでした。再度お試しください。');
+            return;
+        }
+
+        const refreshed = await this.selectDate(date, true);
+        if (refreshed) {
+            this.showSlotMessage('expired', '選択した予約時間は過ぎています。最新の予約枠を表示しましたので、再度お選びください。');
+        } else {
+            this.showSlotMessage('error', '最新の予約枠を取得できませんでした。再度お試しください。');
+        }
+    }
+
+    showSlotMessage(type, message) {
+        if (!this.slotMessage) {
+            return;
+        }
+        this.slotMessage.className = type === 'error'
+            ? 'mt-3 text-sm text-danger-600'
+            : 'mt-3 text-sm text-warning-700';
+        this.slotMessage.textContent = message;
+        this.slotMessage.classList.remove('hidden');
+    }
+
+    clearSlotMessage() {
+        if (!this.slotMessage) {
+            return;
+        }
+        this.slotMessage.textContent = '';
+        this.slotMessage.classList.add('hidden');
     }
 
     updateSelection() {

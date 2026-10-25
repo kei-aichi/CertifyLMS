@@ -22,6 +22,20 @@ class MeetingAvailabilityServiceTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        Carbon::setTestNow(Carbon::parse('2026-05-31 12:00:00', 'Asia/Tokyo'));
+    }
+
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+
+        parent::tearDown();
+    }
+
     private function attachCoach(Certification $certification, User $coach): void
     {
         $certification->coaches()->attach($coach->id, [
@@ -67,6 +81,40 @@ class MeetingAvailabilityServiceTest extends TestCase
 
         $times = $slots->map(fn (array $s) => $s['slot_start']->format('H:i'))->all();
         $this->assertEquals(['09:00', '11:00'], $times);
+    }
+
+    public function test_excludes_past_and_current_slots_but_returns_future_slots(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-06-01 10:00:00', 'Asia/Tokyo'));
+
+        $certification = Certification::factory()->published()->create();
+        $coach = User::factory()->coach()->create();
+        $this->attachCoach($certification, $coach);
+        CoachAvailability::factory()->forCoach($coach)->onDay(1)->timeRange('09:00:00', '13:00:00')->create();
+
+        $slots = app(MeetingAvailabilityService::class)->slotsForCertification(
+            $certification,
+            Carbon::parse('2026-06-01', 'Asia/Tokyo'),
+        );
+
+        $this->assertSame(['11:00', '12:00'], $slots->pluck('slot_start')->map->format('H:i')->all());
+    }
+
+    public function test_returns_all_slots_for_a_future_date(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-06-01 10:00:00', 'Asia/Tokyo'));
+
+        $certification = Certification::factory()->published()->create();
+        $coach = User::factory()->coach()->create();
+        $this->attachCoach($certification, $coach);
+        CoachAvailability::factory()->forCoach($coach)->onDay(2)->timeRange('09:00:00', '11:00:00')->create();
+
+        $slots = app(MeetingAvailabilityService::class)->slotsForCertification(
+            $certification,
+            Carbon::parse('2026-06-02', 'Asia/Tokyo'),
+        );
+
+        $this->assertSame(['09:00', '10:00'], $slots->pluck('slot_start')->map->format('H:i')->all());
     }
 
     public function test_excludes_inactive_availability(): void

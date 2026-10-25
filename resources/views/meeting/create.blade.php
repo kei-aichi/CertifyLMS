@@ -110,6 +110,8 @@
                     {{-- 時刻スロットは JS で描画 --}}
                 </div>
 
+                <p class="mt-3 hidden text-sm" data-slot-message aria-live="polite"></p>
+
                 <div class="mt-3 hidden text-sm text-ink-500" data-slots-empty>
                     <x-icon name="information-circle" class="w-4 h-4 inline" />
                     この日に空きスロットはありません。別の日をお選びください。
