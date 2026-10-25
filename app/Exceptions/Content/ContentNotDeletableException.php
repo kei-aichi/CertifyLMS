@@ -39,6 +39,11 @@ final class ContentNotDeletableException extends ConflictHttpException
         return self::build('Section');
     }
 
+    public static function forSectionRelatedData(): self
+    {
+        return self::buildChildren('Section');
+    }
+
     public static function forSectionQuestion(): self
     {
         return self::build('演習問題');
