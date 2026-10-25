@@ -17,6 +17,72 @@
 - Docker Desktop / Docker Compose
 - 開発環境は Laravel Sail で構築します（PHP コンテナ・MySQL・Mailpit・phpMyAdmin を起動）
 
+### PHPバージョンとセキュリティ更新
+
+2026年10月21日に案内されたPHPの重大な脆弱性への対応として、2026年10月25日にLaravel SailのPHPを8.5.11から8.5.12へ更新しました。
+
+更新後の検証結果は次のとおりです。
+
+| 項目 | 結果 |
+|---|---|
+| PHP | 8.5.11 → 8.5.12 |
+| Laravel | 10.50.2 |
+| Dockerイメージ再ビルド | 成功 |
+| Laravelコンテナ再作成 | 成功 |
+| Composerプラットフォーム要件 | 全項目成功 |
+| Laravel全テスト | 2,309件成功 |
+| アサーション | 7,695件 |
+| 失敗テスト | 0件 |
+| ブラウザでのログイン・ダッシュボード表示 | 正常 |
+
+この更新では、アプリケーションコードとComposer依存パッケージの変更は行っていません。
+
+#### クローン後のPHPバージョン確認
+
+Laravel SailのPHPパッチバージョンは固定されていないため、クローン後やDockerイメージの再ビルド後は、コンテナ内のPHPバージョンを確認してください。
+
+以下は、プロジェクトルートのホスト側ターミナルで実行します。
+
+```bash
+docker compose exec laravel.test php -v
+```
+
+PHP 8.5.12未満の場合は、セキュリティ更新のためDockerイメージを再ビルドしてください。
+
+#### Dockerイメージの再ビルド
+
+`WWWUSER`・`WWWGROUP`には、利用環境のホストユーザーに対応する適切な数値を設定してください。以下では、現在のユーザーIDとグループIDを設定しています。
+
+```bash
+export WWWUSER="$(id -u)"
+export WWWGROUP="$(id -g)"
+
+docker compose build --no-cache laravel.test
+docker compose up -d --no-deps --force-recreate laravel.test
+docker compose exec laravel.test php -v
+```
+
+DockerfileではPHPのパッチバージョンを固定していないため、再ビルド後も必ずPHP 8.5.12以上になるとは限りません。再ビルド後の`php -v`で実際のバージョンを確認し、8.5.12未満の場合は更新完了として扱わないでください。
+
+#### 更新後の確認
+
+更新後は、Composerのプラットフォーム要件とLaravelのテストを確認してください。
+
+```bash
+docker compose exec laravel.test composer check-platform-reqs
+docker compose exec laravel.test php artisan test
+```
+
+テスト実行前に、PHPUnitがテスト用DBへ接続する設定になっていることを確認してください。開発DBを初期化・変更しないよう、テスト用DBと開発用DBが分離されていることを確認してから実行します。
+
+#### 注意事項
+
+- PHP更新のためだけに`docker compose down -v`を実行しないでください。
+- PHP更新の確認目的で`migrate:fresh`やSeederを実行しないでください。`migrate`は未適用のMigrationを適用する操作であり、通常は既存テーブルを削除・再作成しませんが、実行前にMigrationの内容と対象DBを確認してください。
+- MySQLの名前付きボリュームを削除しないでください。
+- クローン利用者の環境では、再ビルド後のPHPバージョンを必ず確認してください。
+- 初回環境構築時は、既存の[環境構築手順](#環境構築手順)を優先してください。
+
 ## 環境構築手順
 
 以降のコマンドは、cloneしたリポジトリのルートディレクトリ（`artisan`ファイルがあるディレクトリ）で実行してください。
@@ -731,6 +797,43 @@ echo json_encode([
 sail artisan test                  # 全テスト実行
 sail artisan test --filter=Xxx    # クラス名・メソッド名で絞り込み
 ```
+
+### 実装完了後の品質改善・不具合修正履歴
+
+全チケットの実装完了後、以下の品質改善・不具合修正を行いました。
+
+#### PR #87：並び替えAPIのテスト補完
+
+- [Chapter／Section並び替えAPIのHTTP Featureテスト追加](https://github.com/kei-aichi/CertifyLMS/pull/87)
+- Chapter／Sectionの並び替えAPIについて、HTTP Featureテストが不足していたため、正常系、入力異常系、認可、未認証、DB更新、リダイレクトを検証するテストを追加しました。
+- アプリケーションの動作不具合ではなく、テストカバレッジの補完です。
+
+#### PR #90：模試削除時のエラー処理
+
+- [模試削除時の外部キー制約エラー対応](https://github.com/kei-aichi/CertifyLMS/pull/90)
+- 受験履歴・解答履歴が存在する模試の削除時に、外部キー制約エラーが発生していました。
+- MySQLエラー1451であり、かつ受験履歴または解答履歴に関する対象の外部キー制約名と一致する場合に限り業務エラーへ変換し、HTMLでは日本語エラーを表示し、JSONではHTTP 409を返すようにしました。
+- 関連する受験履歴・解答履歴は削除せず保持します。
+- 対象外のSQLエラーは従来どおり再throwします。
+
+#### PR #91：面談予約枠の期限切れ判定
+
+- [面談予約枠の期限切れ判定修正](https://github.com/kei-aichi/CertifyLMS/pull/91)
+- 当日の開始時刻を過ぎた面談枠が表示・選択できていました。
+- バックエンドで期限切れ枠を除外し、フロントエンドでも枠の選択時・予約送信時に期限切れを再判定するようにしました。
+- 期限切れを検出した場合は選択状態を解除し、空き枠を再取得します。
+
+### 2026年10月25日時点の全体テスト結果
+
+PHP 8.5.12およびLaravel 10.50.2の環境で、次のコマンドを実行しました。
+
+```bash
+docker compose exec laravel.test php artisan test
+```
+
+- 成功テスト：2,309件
+- Assertions：7,695件
+- 失敗：0件
 
 ## Queue worker（Database Queue）
 
